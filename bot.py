@@ -55,7 +55,7 @@ MAIN_MENU_TEXT = (
     "• /cricket - Start New Match\n"
     "• /stats - Your Career Stats\n"
     "• /leaderboard - Global Rankings\n"
-    "• /cancel Match ID - Stop Match|n
+    "• /cancel ID - Stop Match|n
     "🎯 Challenge Your Friend: Use /cricket @username or TG Numeric Id\n\n"
     f"{RULES_SECTION}\n\n"
     f"{FOOTER_TEXT}"
