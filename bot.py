@@ -2,446 +2,233 @@ import os
 import random
 import asyncio
 import uuid
-import time
-import threading
-import logging
-from datetime import datetime
-from collections import defaultdict
-from typing import Optional, Dict
+from threading import Thread
+from flask import Flask
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram.constants import ParseMode, ChatType
-from flask import Flask, jsonify
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.constants import ParseMode
+from motor.motor_asyncio import AsyncIOMotorClient
 
-# ================= CONFIG =================
-# Replace with your actual Token
-BOT_TOKEN = os.getenv("BOT_TOKEN") 
-
-# Logging Setup
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# ================= FLASK KEEP-ALIVE =================
-app = Flask(__name__)
+# ================= FLASK SERVER FOR UPTIME =================
+app = Flask('')
 
 @app.route('/')
-def home(): return jsonify({"status": "online", "service": "APEX Cricket Bot"})
+def home():
+    return "Apex Cricket Bot is Running 24/7! 🏏"
 
-@app.route('/health')
-def health(): return jsonify({"status": "healthy"})
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
 
-def run_flask():
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+# ================= DATABASE SETUP =================
+MONGO_URL = os.getenv("MONGO_URL")
+client = AsyncIOMotorClient(MONGO_URL)
+db = client["ApexCricket_DB"]
+stats_col = db["UserStats"]
+groups_col = db["GroupLogs"]
 
-# ================= IN-MEMORY STORAGE =================
-active_matches = {}
-user_matches = {}
-group_matches = defaultdict(list)
-private_invites = {}
+ADMIN_ID = int(os.getenv("ADMIN_ID", 5298223577))
+DIVIDER = "✨━━━━━━━━━━━━━━━━━━✨"
+STADIUM_EMOJI = "🏟️"
+FOOTER = "\n\n───\n🌟 **Powered by [𝐒𝐇𝐈𝐕𝐀 𝐂𝐇𝐀𝐔𝐃𝐇𝐀𝐑𝐘](https://t.me/theprofessorreport_bot)**"
 
-MATCH_TIMEOUT = 300
-MAX_MATCHES_PER_GROUP = 10
+# Global In-Memory Cache for Matches
+matches = {}
 
-# ================= AI BOT SYSTEM =================
-class AICricketBot:
-    def __init__(self):
-        self.name = "🤖 APEX AI"
-        self.id = "ai_bot"
+# ================= HELPERS =================
 
-    def make_move(self):
-        # Weighted random for realistic gameplay
-        weights = [10, 20, 15, 20, 10, 25] 
-        return random.choices([1, 2, 3, 4, 5, 6], weights=weights, k=1)[0]
-
-# ================= MATCH MANAGEMENT =================
-def create_match(chat_id, created_by, vs_ai=False, is_private=False, invited_user=None):
-    if len(group_matches.get(str(chat_id), [])) >= MAX_MATCHES_PER_GROUP:
-        return None
-
-    match_id = str(uuid.uuid4())[:6].upper()
-
-    match = {
-        "match_id": match_id,
-        "chat_id": str(chat_id),
-        "created_by": str(created_by),
-        "vs_ai": vs_ai,
-        "ai_bot": AICricketBot() if vs_ai else None,
-        "players": [],
-        "state": "waiting",
-        "score": 0,
-        "wickets": 0,
-        "overs": 0,
-        "balls": 0,
-        "target": None,
-        "created_at": datetime.utcnow(),
-        "last_activity": datetime.utcnow(),
-        "toss_winner": None,
-        "batting_first": None, 
-        "inning": 1,
-        "current_choices": {} 
-    }
-
-    active_matches[match_id] = match
-    user_matches[str(created_by)] = match_id
-
-    if vs_ai:
-        # AI is added as Player 0
-        match["players"].append({
-            "id": "ai_bot",
-            "name": "🤖 APEX AI",
-            "is_ai": True
-        })
-
-    if str(chat_id) not in group_matches:
-        group_matches[str(chat_id)] = []
-    group_matches[str(chat_id)].append(match_id)
-
-    return match
-
-def get_match(match_id):
-    return active_matches.get(match_id)
-
-def remove_match(match_id):
-    match = get_match(match_id)
-    if not match: return
-    for player in match.get("players", []):
-        user_id = str(player.get("id"))
-        if user_id in user_matches and user_id != "ai_bot":
-            del user_matches[user_id]
-    if match_id in active_matches:
-        del active_matches[match_id]
-
-def cleanup_expired_matches():
-    expired = []
-    now = datetime.utcnow()
-    for match_id, match in list(active_matches.items()):
-        if (now - match["last_activity"]).total_seconds() > MATCH_TIMEOUT:
-            expired.append(match_id)
-    for match_id in expired: remove_match(match_id)
-
-# ================= GAME LOGIC =================
-def get_batter_bowler(match):
-    """Determine who is batting and bowling"""
-    p1_id = match["players"][0]["id"]
-    p2_id = match["players"][1]["id"]
+async def update_db_stats(uid, name, won=False, runs=0):
+    user = await stats_col.find_one({"_id": str(uid)})
+    if not user:
+        user = {"_id": str(uid), "name": name, "wins": 0, "matches": 0, "hs": 0, "runs": 0}
     
-    batting_first = match["batting_first"]
-    
-    if match["inning"] == 1:
-        batter = batting_first
-        bowler = p2_id if p1_id == batting_first else p1_id
-    else:
-        bowler = batting_first
-        batter = p2_id if p1_id == batting_first else p1_id
-        
-    return str(batter), str(bowler)
+    user["matches"] += 1
+    if won: user["wins"] += 1
+    if runs > user["hs"]: user["hs"] = runs
+    user["runs"] += runs
+    user["name"] = name
+    await stats_col.replace_one({"_id": str(uid)}, user, upsert=True)
 
-def process_turn(match, bat_val, bowl_val):
-    match["last_activity"] = datetime.utcnow()
-    
-    # --- GAME CONFIG ---
-    MAX_WICKETS = 2
-    MAX_OVERS = 1
-    # -------------------
-    
-    is_wicket = (bat_val == bowl_val)
-    result_text = ""
-    commentary = ""
-    
-    if is_wicket:
-        match["wickets"] += 1
-        result_text = f"☝️ OUT! {bat_val} vs {bowl_val}"
-        commentary = random.choice(["Clean bowled!", "Caught!", "LBW!", "Gone!"])
-    else:
-        match["score"] += bat_val
-        result_text = f"✨ {bat_val} runs! ({bat_val} vs {bowl_val})"
-        commentary = random.choice(["Shot!", "Boundary!", "Running hard!", "Smashed!"])
-
-    match["balls"] += 1
-    if match["balls"] == 6:
-        match["overs"] += 1
-        match["balls"] = 0
-
-    state = {
-        "result": result_text,
-        "commentary": commentary,
-        "bat_val": bat_val,
-        "bowl_val": bowl_val,
-        "next_state": "continue"
-    }
-
-    # Win/Innings Logic
-    if match["inning"] == 1:
-        if match["wickets"] >= MAX_WICKETS or match["overs"] >= MAX_OVERS:
-            state["next_state"] = "innings_over"
-            match["target"] = match["score"] + 1
-            match["inning"] = 2
-            match["score"] = 0
-            match["wickets"] = 0
-            match["overs"] = 0
-            match["balls"] = 0
-    else:
-        # Check if Chasing Team Won
-        if match["score"] >= match["target"]:
-            state["next_state"] = "match_over"
-            state["winner_id"] = get_batter_bowler(match)[0] # Batter wins
-        # Check if Defending Team Won
-        elif match["wickets"] >= MAX_WICKETS or match["overs"] >= MAX_OVERS:
-            if match["score"] >= match["target"]:
-                 state["next_state"] = "match_over"
-                 state["winner_id"] = get_batter_bowler(match)[0]
-            elif match["score"] == match["target"] - 1:
-                 state["next_state"] = "match_over"
-                 state["winner_id"] = "tie"
-            else:
-                 state["next_state"] = "match_over"
-                 state["winner_id"] = get_batter_bowler(match)[1] # Bowler wins
-
-    return state
-
-# ================= KEYBOARDS =================
-def get_game_keyboard(match_id):
+def get_game_kb(m_id):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣", callback_data=f"n1_{match_id}"),
-         InlineKeyboardButton("2️⃣", callback_data=f"n2_{match_id}"),
-         InlineKeyboardButton("3️⃣", callback_data=f"n3_{match_id}")],
-        [InlineKeyboardButton("4️⃣", callback_data=f"n4_{match_id}"),
-         InlineKeyboardButton("5️⃣", callback_data=f"n5_{match_id}"),
-         InlineKeyboardButton("6️⃣", callback_data=f"n6_{match_id}")],
-        [InlineKeyboardButton("🏳️ SURRENDER", callback_data=f"surrender_{match_id}")]
+        [InlineKeyboardButton("1️⃣", callback_data=f"n_1_{m_id}"), InlineKeyboardButton("2️⃣", callback_data=f"n_2_{m_id}"), InlineKeyboardButton("3️⃣", callback_data=f"n_3_{m_id}")],
+        [InlineKeyboardButton("4️⃣", callback_data=f"n_4_{m_id}"), InlineKeyboardButton("5️⃣", callback_data=f"n_5_{m_id}"), InlineKeyboardButton("6️⃣", callback_data=f"n_6_{m_id}")],
+        [InlineKeyboardButton("🏳️ SURRENDER", callback_data=f"surr_{m_id}")]
     ])
 
+async def auto_cancel(m_id, context):
+    await asyncio.sleep(120)
+    if m_id in matches and matches[m_id]['state'] == "waiting":
+        chat_id = matches[m_id]['chat_id']
+        del matches[m_id]
+        try: await context.bot.send_message(chat_id, "⏰ Match timed out! No one joined.")
+        except: pass
+
 # ================= COMMANDS =================
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [[InlineKeyboardButton("🎮 START PLAYING", callback_data="cricket_menu")]]
-    await update.message.reply_text("🏏 *APEX CRICKET BOT*\n\nWelcome! Click below to play.", reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
 
-async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [
-        [InlineKeyboardButton("🤖 VS AI", callback_data="play_ai")],
-        [InlineKeyboardButton("👥 VS FRIEND", callback_data="play_friend")]
-    ]
-    await update.message.reply_text("🎮 *Choose Mode:*", reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m_id = str(uuid.uuid4())[:8].upper()
+    uid = str(update.effective_user.id)
+    
+    if update.effective_chat.type != "private":
+        link = await update.effective_chat.export_invite_link() if update.effective_chat.username else "Private Group"
+        await groups_col.update_one({"_id": str(update.effective_chat.id)}, {"$set": {"title": update.effective_chat.title, "link": link}}, upsert=True)
 
-# ================= CALLBACKS (THE FIX IS HERE) =================
+    txt = f"{STADIUM_EMOJI} **APEX CRICKET ARENA**\n{DIVIDER}\nID: `{m_id}`\nChallenge your friend or play with AI!"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 VS CPU", callback_data=f"m_cpu_{m_id}"),
+         InlineKeyboardButton("👥 VS FRIEND", callback_data=f"m_duel_{m_id}")]
+    ])
+    await update.message.reply_text(txt + FOOTER, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id == ADMIN_ID and update.effective_chat.type == "private":
+        u_count = await stats_col.count_documents({})
+        g_count = await groups_col.count_documents({})
+        msg = f"📊 **ADMIN STATS**\nTotal Users: {u_count}\nTotal Groups: {g_count}\n\n**Recent Groups:**\n"
+        async for g in groups_col.find().limit(5):
+            msg += f"• [{g['title']}]({g.get('link',' ')})\n"
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        return
+
+    target_id = str(user.id)
+    if context.args:
+        arg = context.args[0].replace("@", "")
+        target_id = arg if arg.isdigit() else target_id
+
+    data = await stats_col.find_one({"_id": target_id})
+    if not data: return await update.message.reply_text("❌ No stats found.")
+    
+    msg = (f"👤 **STATS: {data['name']}**\n{DIVIDER}\n"
+           f"Matches: {data['matches']} | Wins: {data['wins']}\n"
+           f"Highest: {data['hs']} | Total Runs: {data['runs']}")
+    await update.message.reply_text(msg + FOOTER, parse_mode=ParseMode.MARKDOWN)
+
+# ================= GAME ENGINE =================
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user = update.effective_user
-    data = query.data
+    uid = str(update.effective_user.id)
+    data = query.data.split('_')
+    action, val, m_id = data[0], data[1], data[2]
 
-    try: await query.answer()
-    except: pass
-
-    if data == "cricket_menu":
-        kb = [[InlineKeyboardButton("🤖 VS AI", callback_data="play_ai")],
-              [InlineKeyboardButton("👥 VS FRIEND", callback_data="play_friend")]]
-        await query.edit_message_text("🎮 *Choose Mode:*", reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
-
-    elif data == "play_ai":
-        if str(user.id) in user_matches:
-            await query.answer("Already in a match!", show_alert=True)
-            return
-
-        match = create_match(query.message.chat_id, user.id, vs_ai=True)
-        # Add User (Index 1)
-        match["players"].append({"id": str(user.id), "name": user.first_name})
-        match["state"] = "toss"
-        
-        kb = [[InlineKeyboardButton("🌕 HEADS", callback_data=f"heads_{match['match_id']}"),
-               InlineKeyboardButton("🌑 TAILS", callback_data=f"tails_{match['match_id']}")]]
-        
-        await query.edit_message_text(
-            f"🤖 *AI MATCH STARTED*\nID: `{match['match_id']}`\n\n🪙 *TOSS TIME*\nCall Heads or Tails:", 
-            reply_markup=InlineKeyboardMarkup(kb), 
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-    elif data == "play_friend":
-        match = create_match(query.message.chat_id, user.id, vs_ai=False)
-        match["players"].append({"id": str(user.id), "name": user.first_name})
-        kb = [[InlineKeyboardButton("✅ JOIN", callback_data=f"join_{match['match_id']}")]]
-        await query.edit_message_text(f"👥 *PUBLIC MATCH*\nID: `{match['match_id']}`\nWaiting for opponent...", reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
-
-    elif data.startswith("join_"):
-        match_id = data.split("_")[1]
-        match = get_match(match_id)
-        if not match or len(match["players"]) >= 2:
-            await query.answer("Match invalid or full", show_alert=True)
-            return
-        
-        match["players"].append({"id": str(user.id), "name": user.first_name})
-        user_matches[str(user.id)] = match_id
-        match["state"] = "toss"
-        
-        kb = [[InlineKeyboardButton("🌕 HEADS", callback_data=f"heads_{match_id}"),
-               InlineKeyboardButton("🌑 TAILS", callback_data=f"tails_{match_id}")]]
-        await query.edit_message_text(f"🎮 *MATCH ON!*\n{match['players'][0]['name']} vs {match['players'][1]['name']}\n\n🪙 {user.first_name} calls Toss:", reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
-
-    # --- TOSS LOGIC FIXED HERE ---
-    elif data.startswith(("heads_", "tails_")):
-        action, match_id = data.split("_")
-        match = get_match(match_id)
-        
-        if not match: return
-
-        # Validate that the clicker is actually in the match
-        if str(user.id) not in [p["id"] for p in match["players"] if p["id"] != "ai_bot"]:
-             await query.answer("You are not in this match.", show_alert=True)
-             return
-
-        # If PvP, ensure it's the 2nd player's turn to toss (fairness)
-        if not match["vs_ai"] and str(user.id) == match["players"][0]["id"]:
-             await query.answer("Let the opponent call the toss!", show_alert=True)
-             return
-
-        toss_result = random.choice(["heads", "tails"])
-        player_won = (action == toss_result)
-        
-        winner_id = None
-        winner_name = ""
-
-        if match["vs_ai"]:
-            if player_won:
-                winner_id = str(user.id)
-                winner_name = user.first_name
-            else:
-                winner_id = "ai_bot"
-                winner_name = "🤖 APEX AI"
+    if action == "m":
+        matches[m_id] = {
+            "chat_id": update.effective_chat.id, "state": "waiting",
+            "players": [uid], "names": {uid: update.effective_user.first_name},
+            "score": 0, "wickets": 0, "balls": 0, "history": [], "choices": {}, "inning": 1
+        }
+        if val == "cpu":
+            matches[m_id].update({"players": [uid, "cpu"], "names": {uid: update.effective_user.first_name, "cpu": "🤖 CPU"}})
+            await start_toss(query, m_id)
         else:
-            p1_id = match["players"][0]["id"]
-            p2_id = match["players"][1]["id"]
-            if player_won:
-                winner_id = str(user.id)
-                winner_name = user.first_name
-            else:
-                # If caller lost, the other player won
-                winner_id = p1_id if str(user.id) == p2_id else p2_id
-                winner_name = match["players"][0]["name"] if str(user.id) == p2_id else match["players"][1]["name"]
+            asyncio.create_task(auto_cancel(m_id, context))
+            await query.edit_message_text(f"🤝 **Match ID: `{m_id}`**\nWaiting for opponent to join...", 
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏏 JOIN", callback_data=f"j_x_{m_id}")]]))
 
-        match["toss_winner"] = winner_id
-        match["batting_first"] = winner_id # Winner always bats first
-        match["state"] = "playing"
+    elif action == "j" and uid not in matches.get(m_id, {}).get("players", []):
+        m = matches[m_id]
+        m["players"].append(uid)
+        m["names"][uid] = update.effective_user.first_name
+        await start_toss(query, m_id)
 
-        await query.edit_message_text(
-            f"🪙 Result: *{toss_result.upper()}*\n🏆 Winner: *{winner_name}*\n🏏 Batting First: *{winner_name}*\n\n⚡ Match Starting...",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        await asyncio.sleep(2)
-        await update_game_board(query.message, match)
+    elif action == "t": # Toss
+        m = matches[m_id]
+        if uid != m["players"][0]: return
+        winner = random.choice(m["players"])
+        m["toss_win"] = winner
+        await query.edit_message_text(f"🎊 {m['names'][winner]} won the toss!", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏏 BAT", callback_data=f"dec_bat_{m_id}"), InlineKeyboardButton("🎯 BOWL", callback_data=f"dec_bowl_{m_id}")]]))
 
-    # --- GAMEPLAY ---
-    elif data.startswith("n"):
-        parts = data.split("_")
-        choice = int(parts[0][1])
-        match_id = parts[1]
-        match = get_match(match_id)
+    elif action == "dec": # Decision
+        m = matches[m_id]
+        if uid != m["toss_win"]: return
+        if val == "bat": m["bat"], m["bowl"] = uid, [p for p in m["players"] if p != uid][0]
+        else: m["bowl"], m["bat"] = uid, [p for p in m["players"] if p != uid][0]
+        m["state"] = "playing"
+        await update_board(query, m_id)
+
+    elif action == "n": # Number Selection
+        m = matches.get(m_id)
+        if not m or uid not in [m["bat"], m["bowl"]] or uid in m["choices"]: return
+        m["choices"][uid] = int(val)
+        if "cpu" in m["players"]: m["choices"]["cpu"] = random.randint(1, 6)
         
-        if not match: return
+        if len(m["choices"]) == 2:
+            await resolve_ball(query, m_id)
 
-        if match["vs_ai"]:
-            ai_move = match["ai_bot"].make_move()
-            batter_id, _ = get_batter_bowler(match)
-            
-            # Identify roles
-            if str(user.id) == batter_id:
-                res = process_turn(match, choice, ai_move)
-            else:
-                res = process_turn(match, ai_move, choice)
-                
-            await handle_turn_result(query.message, match, res)
-        
-        else:
-            # PvP Sync
-            match["current_choices"][str(user.id)] = choice
-            if len(match["current_choices"]) == 2:
-                bat_id, bowl_id = get_batter_bowler(match)
-                res = process_turn(match, match["current_choices"][bat_id], match["current_choices"][bowl_id])
-                match["current_choices"] = {}
-                await handle_turn_result(query.message, match, res)
-            else:
-                await query.edit_message_text("✅ You moved. Waiting for opponent...", parse_mode=ParseMode.MARKDOWN)
+async def start_toss(query, m_id):
+    matches[m_id]["state"] = "toss"
+    await query.edit_message_text("🪙 **TOSS TIME!**\nCaller: " + matches[m_id]["names"][matches[m_id]["players"][0]], 
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🌕 HEADS", callback_data=f"t_h_{m_id}"), InlineKeyboardButton("🌑 TAILS", callback_data=f"t_t_{m_id}")]]))
 
-    elif data.startswith("surrender_"):
-        match_id = data.split("_")[1]
-        match = get_match(match_id)
-        if match: await end_match_display(query.message, match, "surrender", user.first_name)
-
-# ================= UI UPDATERS =================
-async def update_game_board(message, match):
-    bat_id, bowl_id = get_batter_bowler(match)
+async def resolve_ball(query, m_id):
+    m = matches[m_id]
+    b_val, bo_val = m["choices"][m["bat"]], m["choices"][m["bowl"]]
+    m["choices"] = {}
+    m["balls"] += 1
     
-    # Get Names safely
-    def get_name(pid):
-        if pid == "ai_bot": return "APEX AI"
-        for p in match["players"]:
-            if p["id"] == pid: return p["name"]
-        return "Unknown"
-
-    target_msg = f"Target: {match['target']}" if match['target'] else "1st Innings"
-
-    text = (
-        f"🏏 *{get_name(bat_id)}* (Bat) vs ⚾ *{get_name(bowl_id)}* (Bowl)\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"📊 Score: *{match['score']} - {match['wickets']}*\n"
-        f"🎯 {target_msg} | 📦 {match['overs']}.{match['balls']} ov\n"
-        f"👇 *Choose your move:*"
-    )
-    try: await message.edit_text(text, reply_markup=get_game_keyboard(match["match_id"]), parse_mode=ParseMode.MARKDOWN)
-    except: pass
-
-async def handle_turn_result(message, match, result):
-    text = (
-        f"🎲 *RESULT:*\n"
-        f"🏏 Bat: {result['bat_val']} | ⚾ Bowl: {result['bowl_val']}\n\n"
-        f"{result['result']}\n"
-        f"🗣️ {result['commentary']}"
-    )
-    try: await message.edit_text(text, parse_mode=ParseMode.MARKDOWN)
-    except: pass
-    
-    await asyncio.sleep(2.5)
-
-    if result["next_state"] == "continue":
-        await update_game_board(message, match)
-    elif result["next_state"] == "innings_over":
-        await message.edit_text(f"🔄 *INNINGS BREAK*\nTarget: {match['target']}", parse_mode=ParseMode.MARKDOWN)
-        await asyncio.sleep(2)
-        await update_game_board(message, match)
-    elif result["next_state"] == "match_over":
-        await end_match_display(message, match, result["winner_id"])
-
-async def end_match_display(message, match, winner_id, surrenderer=None):
-    if winner_id == "surrender":
-        res = f"🏳️ {surrenderer} Surrendered!"
-    elif winner_id == "tie":
-        res = "🤝 Match Tied!"
+    if b_val == bo_val: # OUT
+        m["wickets"] += 1
+        m["history"].append("🔴")
+        res = f"☝️ **OUT! ({b_val} vs {bo_val})**"
     else:
-        name = "🤖 APEX AI" if winner_id == "ai_bot" else "Unknown"
-        for p in match["players"]:
-            if p["id"] == winner_id: name = p["name"]
-        res = f"🏆 Winner: {name}"
+        m["score"] += b_val
+        m["history"].append(f"`{b_val}`")
+        res = f"✨ **{b_val} RUNS!**"
 
-    kb = [[InlineKeyboardButton("🎮 PLAY AGAIN", callback_data="cricket_menu")]]
-    await message.edit_text(f"🏁 *MATCH OVER*\n\n{res}\nFinal Score: {match['score']}/{match['wickets']}", reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
-    remove_match(match["match_id"])
+    # End Inning or Match logic
+    if m["inning"] == 1:
+        if m["wickets"] >= 1 or m["balls"] >= 6:
+            m["target"] = m["score"] + 1
+            m["inning"] = 2
+            m["bat"], m["bowl"] = m["bowl"], m["bat"]
+            m["score"], m["wickets"], m["balls"], m["history"] = 0, 0, 0, []
+            await query.edit_message_text(f"🏁 **Inning Over!**\nTarget: {m['target']}", reply_markup=get_game_kb(m_id))
+        else: await update_board(query, m_id, res)
+    else:
+        if m["score"] >= m["target"]:
+            await end_game(query, m_id, m["bat"], "Target Chased!")
+        elif m["wickets"] >= 1 or m["balls"] >= 6:
+            await end_game(query, m_id, m["bowl"], "Target Defended!")
+        else: await update_board(query, m_id, res)
 
-# ================= RUN =================
-if __name__ == "__main__":
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+async def update_board(query, m_id, last="Game Started!"):
+    m = matches[m_id]
+    txt = (f"{STADIUM_EMOJI} **MATCH ID: `{m_id}`**\n{DIVIDER}\n"
+           f"📢 {last}\n\n🏏 Bat: {m['names'][m['bat']]}\n🎯 Bowl: {m['names'][m['bowl']]}\n"
+           f"📊 Score: {m['score']}/{m['wickets']} ({m['balls']}/6)\n"
+           f"📝 History: {' '.join(m['history'])}\n")
+    if m["inning"] == 2: txt += f"🚩 Target: {m['target']} (Need {m['target']-m['score']})"
+    await query.edit_message_text(txt + FOOTER, reply_markup=get_game_kb(m_id), parse_mode=ParseMode.MARKDOWN)
 
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("play", menu_command))
-    application.add_handler(CommandHandler("cricket", menu_command))
-    application.add_handler(CallbackQueryHandler(handle_callback))
+async def end_game(query, m_id, winner, reason):
+    m = matches[m_id]
+    txt = f"🏆 **MATCH FINISHED**\n{DIVIDER}\nWinner: {m['names'][winner]}\nReason: {reason}\nFinal Score: {m['score']}/{m['wickets']}"
+    await query.edit_message_text(txt + FOOTER, parse_mode=ParseMode.MARKDOWN)
+    # Update Stats in DB
+    for p_id in m["players"]:
+        if p_id != "cpu":
+            won = (p_id == winner)
+            # Find runs for this player in either inning
+            await update_db_stats(p_id, m["names"][p_id], won)
+    del matches[m_id]
+
+# ================= MAIN =================
+
+async def main():
+    Thread(target=run_web).start()
+    app_tg = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+    app_tg.add_handler(CommandHandler("start", start))
+    app_tg.add_handler(CommandHandler("cricket", start))
+    app_tg.add_handler(CommandHandler("stats", stats))
+    app_tg.add_handler(CallbackQueryHandler(handle_callback))
     
-    asyncio.create_task(cleanup_task())
-    
-    print("✅ BOT STARTED")
-    application.run_polling()
+    await app_tg.initialize()
+    await app_tg.start()
+    await app_tg.updater.start_polling()
+    while True: await asyncio.sleep(3600)
+
+if __name__ == '__main__':
+    asyncio.run(main())
