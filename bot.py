@@ -217,18 +217,36 @@ async def end_game(query, m_id, winner, reason):
 
 # ================= MAIN =================
 
+# पुराने main() को इससे बदलें
 async def main():
-    Thread(target=run_web).start()
-    app_tg = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
-    app_tg.add_handler(CommandHandler("start", start))
-    app_tg.add_handler(CommandHandler("cricket", start))
-    app_tg.add_handler(CommandHandler("stats", stats))
-    app_tg.add_handler(CallbackQueryHandler(handle_callback))
+    # वेब सर्वर शुरू करें (Render के पोर्ट बाइंडिंग के लिए)
+    Thread(target=run_web, daemon=True).start()
+
+    token = os.getenv("BOT_TOKEN")
+    # Application को सही तरीके से बिल्ड करें
+    application = ApplicationBuilder().token(token).build()
+
+    # Handlers जोड़ें
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("cricket", start))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CallbackQueryHandler(handle_callback))
     
-    await app_tg.initialize()
-    await app_tg.start()
-    await app_tg.updater.start_polling()
-    while True: await asyncio.sleep(3600)
+    print("✅ Bot is Online and Polling...")
+
+    # पक्का करें कि पिछला कोई पुराना कनेक्शन न बचा हो
+    async with application:
+        await application.initialize()
+        await application.start()
+        # यहाँ drop_pending_updates=True डालने से पुराने अटके हुए मैसेज एरर नहीं देंगे
+        await application.updater.start_polling(drop_pending_updates=True)
+        
+        # बॉट को चालू रखने के लिए
+        while True:
+            await asyncio.sleep(3600)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("🛑 Bot Stopped.")
