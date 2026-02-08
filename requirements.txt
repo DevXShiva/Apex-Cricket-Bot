@@ -1,5 +1,4 @@
-python-telegram-bot
+python-telegram-bot --pre
 motor
-flask
-gunicorn
 dnspython
+python-dotenv
