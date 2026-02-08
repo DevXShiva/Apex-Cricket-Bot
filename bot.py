@@ -38,32 +38,9 @@ active_matches = {}
 user_matches = {}
 group_matches = defaultdict(list)
 private_invites = {}
-ai_matches = {}  # Store AI vs Human matches
 
 MATCH_TIMEOUT = 120
 MAX_MATCHES_PER_GROUP = 10
-
-# ================= COLORED BUTTONS SYSTEM =================
-def create_button(text, callback_data=None, url=None, style=None, emoji_id=None):
-    """Create button with color and style"""
-    button_dict = {"text": text}
-    if callback_data: button_dict["callback_data"] = callback_data
-    if url: button_dict["url"] = url
-    if style: button_dict["style"] = style
-    if emoji_id: button_dict["icon_custom_emoji_id"] = emoji_id
-    return button_dict
-
-def primary_btn(text, callback_data):
-    return create_button(text, callback_data, style="primary")
-
-def success_btn(text, callback_data):
-    return create_button(text, callback_data, style="success")
-
-def danger_btn(text, callback_data):
-    return create_button(text, callback_data, style="danger")
-
-def normal_btn(text, callback_data):
-    return create_button(text, callback_data)
 
 # ================= AI BOT SYSTEM =================
 class AICricketBot:
@@ -73,69 +50,20 @@ class AICricketBot:
         self.difficulty = difficulty
         self.name = "🤖 APEX AI"
         self.id = "ai_bot"
-        self.patterns = []
-        self.last_moves = []
     
-    def make_move(self, match_state=None):
+    def make_move(self):
         """AI makes a cricket move (1-6) based on difficulty"""
         if self.difficulty == "easy":
-            # Easy AI - more predictable
-            if random.random() < 0.6:  # 60% chance of 1-3
-                return random.randint(1, 3)
-            return random.randint(1, 6)
-        
+            return random.randint(1, 3) if random.random() < 0.7 else random.randint(1, 6)
         elif self.difficulty == "medium":
-            # Medium AI - balanced
-            weights = [15, 20, 25, 20, 15, 5]  # Weighted probabilities
-            return random.choices(range(1, 7), weights=weights)[0]
-        
+            return random.randint(1, 6)
         elif self.difficulty == "hard":
-            # Hard AI - strategic
-            if match_state:
-                # Analyze match state
-                if match_state.get("wickets", 0) >= 1:
-                    return random.randint(1, 3)  # Defensive
-                elif match_state.get("balls", 0) >= 3:
-                    return random.randint(4, 6)  # Aggressive
-            return random.randint(1, 6)
-        
+            return random.randint(4, 6) if random.random() < 0.6 else random.randint(1, 3)
         else:
             return random.randint(1, 6)
-    
-    def get_commentary(self, runs, is_wicket=False):
-        """AI commentary"""
-        if is_wicket:
-            comments = [
-                "🤖 AI: Perfect delivery! Wicket!",
-                "🤖 AI: Got you! That's out!",
-                "🤖 AI: Brilliant ball! Clean bowled!",
-                "🤖 AI: Calculated! Wicket secured!"
-            ]
-        elif runs == 6:
-            comments = [
-                "🤖 AI: Maximum! Perfect shot!",
-                "🤖 AI: Six! That's huge!",
-                "🤖 AI: Over the ropes! Beautiful!",
-                "🤖 AI: AI smashes it for six!"
-            ]
-        elif runs == 4:
-            comments = [
-                "🤖 AI: Boundary! Well played!",
-                "🤖 AI: Four runs! Nice shot!",
-                "🤖 AI: Edge to boundary!",
-                "🤖 AI: AI finds the gap!"
-            ]
-        else:
-            comments = [
-                f"🤖 AI: {runs} runs taken.",
-                f"🤖 AI: Good running, {runs} runs.",
-                f"🤖 AI: Takes {runs} runs.",
-                f"🤖 AI: {runs} runs added."
-            ]
-        return random.choice(comments)
 
 # ================= MATCH MANAGEMENT =================
-def create_match(chat_id, created_by, is_private=False, invited_user=None, vs_ai=False, ai_difficulty="medium"):
+def create_match(chat_id, created_by, vs_ai=False, ai_difficulty="medium", is_private=False, invited_user=None):
     if len(group_matches.get(str(chat_id), [])) >= MAX_MATCHES_PER_GROUP:
         return None
     
@@ -145,11 +73,11 @@ def create_match(chat_id, created_by, is_private=False, invited_user=None, vs_ai
         "match_id": match_id,
         "chat_id": str(chat_id),
         "created_by": str(created_by),
-        "is_private": is_private,
-        "invited_user": invited_user,
         "vs_ai": vs_ai,
         "ai_difficulty": ai_difficulty,
         "ai_bot": AICricketBot(ai_difficulty) if vs_ai else None,
+        "is_private": is_private,
+        "invited_user": invited_user,
         "players": [],
         "state": "waiting",
         "score": 0,
@@ -160,25 +88,20 @@ def create_match(chat_id, created_by, is_private=False, invited_user=None, vs_ai
         "created_at": datetime.utcnow(),
         "last_activity": datetime.utcnow(),
         "message_id": None,
-        "current_batsman": None,
-        "current_bowler": None,
-        "choices": {},
-        "ball_history": [],
+        "toss_winner": None,
+        "batting_first": None,
         "inning": 1,
-        "max_overs": 1,
-        "max_wickets": 2
+        "choices": {}
     }
     
     active_matches[match_id] = match
     user_matches[str(created_by)] = match_id
     
     if vs_ai:
-        ai_matches[match_id] = match
         # AI joins automatically
         match["players"].append({
             "id": "ai_bot",
             "name": "🤖 APEX AI",
-            "username": "apex_ai",
             "is_ai": True
         })
     
@@ -189,7 +112,7 @@ def create_match(chat_id, created_by, is_private=False, invited_user=None, vs_ai
     if is_private and invited_user:
         private_invites[str(invited_user)] = match_id
     
-    logger.info(f"🎮 Match created: {match_id} {'vs AI' if vs_ai else ''}")
+    logger.info(f"🎮 Match created: {match_id}")
     return match
 
 def get_match(match_id):
@@ -210,7 +133,7 @@ def join_match(match_id, user_data):
         return False
     
     if match["is_private"] and match["invited_user"]:
-        if user_data["username"] and user_data["username"].lower() != match["invited_user"].lower():
+        if user_data.get("username", "").lower() != match["invited_user"].lower():
             return False
     
     if str(user_data["id"]) in user_matches:
@@ -244,9 +167,6 @@ def remove_match(match_id):
     if match_id in active_matches:
         del active_matches[match_id]
     
-    if match_id in ai_matches:
-        del ai_matches[match_id]
-    
     logger.info(f"🗑️ Match removed: {match_id}")
 
 def cleanup_expired_matches():
@@ -264,39 +184,19 @@ def cleanup_expired_matches():
     
     return len(expired)
 
-# ================= CRICKET GAME LOGIC =================
-async def play_ball(match_id, batsman_choice):
+# ================= GAME FUNCTIONS =================
+def process_ball(match, batsman_choice, bowler_choice):
     """Process a ball in the match"""
-    match = get_match(match_id)
-    if not match:
-        return None
-    
     match["last_activity"] = datetime.utcnow()
     
-    # Get bowler choice (AI or human)
-    bowler_choice = None
-    if match["vs_ai"] and match["ai_bot"]:
-        # AI makes move
-        bowler_choice = match["ai_bot"].make_move(match)
-        match["choices"]["ai_bot"] = bowler_choice
-    else:
-        # Wait for human bowler choice
-        # This would be handled in callback
-        return None
-    
-    match["choices"][match["current_batsman"]] = batsman_choice
-    
-    # Process ball
     is_wicket = (batsman_choice == bowler_choice)
     
     if is_wicket:
         match["wickets"] += 1
-        match["ball_history"].append("W")
         result = f"☝️ OUT! {batsman_choice} = {bowler_choice}"
-        commentary = "🎯 WICKET! Bowler strikes!"
+        commentary = "🎯 WICKET!"
     else:
         match["score"] += batsman_choice
-        match["ball_history"].append(str(batsman_choice))
         result = f"✨ {batsman_choice} runs! {batsman_choice} ≠ {bowler_choice}"
         commentary = f"🏏 {batsman_choice} runs scored!"
     
@@ -305,45 +205,50 @@ async def play_ball(match_id, batsman_choice):
         match["overs"] += 1
         match["balls"] = 0
     
-    # Check match conditions
-    match_completed = False
-    winner = None
-    
-    if match["wickets"] >= match["max_wickets"]:
-        match_completed = True
-        winner = "bowler"
-    elif match["overs"] >= match["max_overs"]:
-        match_completed = True
+    # Check if innings complete
+    if match["wickets"] >= 2 or match["overs"] >= 1:
         if match["inning"] == 1:
-            # Set target and switch innings
             match["target"] = match["score"] + 1
             match["inning"] = 2
             match["score"] = 0
             match["wickets"] = 0
             match["overs"] = 0
             match["balls"] = 0
-            match["ball_history"] = []
-            match_completed = False
+            return {
+                "result": result,
+                "commentary": commentary,
+                "is_wicket": is_wicket,
+                "runs": 0 if is_wicket else batsman_choice,
+                "innings_complete": True,
+                "target": match["target"]
+            }
         else:
-            # Second innings complete
-            if match["score"] >= match["target"]:
-                winner = "batsman"
-            else:
-                winner = "bowler"
+            return {
+                "result": result,
+                "commentary": commentary,
+                "is_wicket": is_wicket,
+                "runs": 0 if is_wicket else batsman_choice,
+                "match_complete": True,
+                "winner": "batsman" if match["score"] >= match["target"] else "bowler"
+            }
     
     if match["inning"] == 2 and match["target"] and match["score"] >= match["target"]:
-        match_completed = True
-        winner = "batsman"
+        return {
+            "result": result,
+            "commentary": commentary,
+            "is_wicket": is_wicket,
+            "runs": 0 if is_wicket else batsman_choice,
+            "match_complete": True,
+            "winner": "batsman"
+        }
     
     return {
         "result": result,
         "commentary": commentary,
         "is_wicket": is_wicket,
-        "runs": batsman_choice if not is_wicket else 0,
-        "match_completed": match_completed,
-        "winner": winner,
-        "score": f"{match['score']}/{match['wickets']}",
-        "overs": f"{match['overs']}.{match['balls']}"
+        "runs": 0 if is_wicket else batsman_choice,
+        "innings_complete": False,
+        "match_complete": False
     }
 
 # ================= COMMAND HANDLERS =================
@@ -354,12 +259,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🏏 APEX CRICKET BOT\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
         "Welcome to the ultimate hand cricket experience!\n\n"
-        "🎮 *NEW FEATURES:*\n"
-        "• Play vs 🤖 APEX AI Bot\n"
-        "• Multiple matches in same group\n"
-        "• Private challenges with friends\n"
-        "• Auto-cleanup after 2 mins\n\n"
-        "🚀 *QUICK COMMANDS:*\n"
+        "🎮 Play vs 🤖 APEX AI or challenge friends!\n\n"
+        "🚀 Commands:\n"
         "/cricket - Start a match\n"
         "/challenge @username - Challenge friend\n"
         "/join MATCHID - Join match\n"
@@ -370,18 +271,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     keyboard = [
-        [primary_btn("🎮 PLAY CRICKET", "play_cricket"), success_btn("📊 MY STATS", "my_stats")],
-        [normal_btn("👥 VS FRIEND", "play_friend"), normal_btn("🤖 VS AI", "play_vs_ai")]
+        [
+            InlineKeyboardButton("🎮 PLAY CRICKET", callback_data="cricket_menu"),
+            InlineKeyboardButton("📊 MY STATS", callback_data="my_stats")
+        ]
     ]
     
     await update.message.reply_text(
         welcome_text,
-        reply_markup={"inline_keyboard": keyboard},
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
 
 async def cricket_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /cricket command - Main entry point"""
     user = update.effective_user
     chat = update.effective_chat
     
@@ -396,32 +298,33 @@ async def cricket_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Show match type selection
     match_type_text = (
-        "🎮 *CHOOSE MATCH TYPE*\n"
+        "🎮 CHOOSE MATCH TYPE\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "Select how you want to play:\n\n"
-        "1. **🤖 VS AI** - Play against APEX AI Bot\n"
-        "2. **👥 VS FRIEND** - Challenge a friend\n"
-        "3. **🎯 QUICK PLAY** - Public match (anyone can join)\n\n"
-        "Click buttons below or use commands:\n"
-        "• `/cricket ai` - Play vs AI\n"
-        "• `/challenge @username` - Challenge friend"
+        "How do you want to play?\n\n"
+        "1. 🤖 VS AI - Play against APEX AI Bot\n"
+        "2. 👥 VS FRIEND - Public match\n"
+        "3. 🔒 PRIVATE - Challenge specific friend\n\n"
+        "Click buttons below:"
     )
     
     keyboard = [
-        [primary_btn("🤖 PLAY VS AI", "play_ai_menu"), success_btn("👥 VS FRIEND", "play_friend_menu")],
-        [normal_btn("🎯 QUICK PLAY", "quick_play"), danger_btn("❌ CANCEL", "cancel_menu")]
+        [
+            InlineKeyboardButton("🤖 VS AI", callback_data="play_ai"),
+            InlineKeyboardButton("👥 VS FRIEND", callback_data="play_friend")
+        ],
+        [
+            InlineKeyboardButton("🔒 PRIVATE CHALLENGE", callback_data="challenge_menu")
+        ]
     ]
     
     await update.message.reply_text(
         match_type_text,
-        reply_markup={"inline_keyboard": keyboard},
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
 
-async def play_vs_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle playing vs AI"""
+async def play_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat = update.effective_chat
     
@@ -432,41 +335,43 @@ async def play_vs_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
     
-    # Check group limit (for group matches)
-    if chat.type != ChatType.PRIVATE:
-        if len(group_matches.get(str(chat.id), [])) >= MAX_MATCHES_PER_GROUP:
-            await update.message.reply_text(
-                f"Maximum matches reached in this group! Only {MAX_MATCHES_PER_GROUP} matches can run simultaneously.",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-    
     # Show AI difficulty selection
     ai_text = (
-        "🤖 *CHOOSE AI DIFFICULTY*\n"
+        "🤖 CHOOSE AI DIFFICULTY\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
         "Select AI opponent difficulty:\n\n"
-        "🟢 **EASY** - Perfect for beginners\n"
-        "🟡 **MEDIUM** - Balanced challenge\n"
-        "🔴 **HARD** - For experienced players\n"
-        "💀 **EXPERT** - Ultimate challenge!\n\n"
-        "Match format: 1 Over | 2 Wickets Max"
+        "🟢 EASY - Perfect for beginners\n"
+        "🟡 MEDIUM - Balanced challenge\n"
+        "🔴 HARD - For experienced players\n\n"
+        "Format: 1 Over | 2 Wickets"
     )
     
     keyboard = [
-        [success_btn("🟢 EASY", "ai_easy"), normal_btn("🟡 MEDIUM", "ai_medium")],
-        [danger_btn("🔴 HARD", "ai_hard"), primary_btn("💀 EXPERT", "ai_expert")],
-        [danger_btn("❌ BACK", "back_to_main")]
+        [
+            InlineKeyboardButton("🟢 EASY", callback_data="ai_easy"),
+            InlineKeyboardButton("🟡 MEDIUM", callback_data="ai_medium"),
+            InlineKeyboardButton("🔴 HARD", callback_data="ai_hard")
+        ],
+        [
+            InlineKeyboardButton("❌ BACK", callback_data="cricket_menu")
+        ]
     ]
     
-    await update.message.reply_text(
-        ai_text,
-        reply_markup={"inline_keyboard": keyboard},
-        parse_mode=ParseMode.MARKDOWN
-    )
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            ai_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text(
+            ai_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
 
-async def create_ai_match(user, chat, difficulty="medium"):
-    """Create AI match helper"""
+async def create_ai_match(user, chat, difficulty):
+    """Create and start AI match"""
     match = create_match(
         chat_id=chat.id,
         created_by=user.id,
@@ -481,34 +386,33 @@ async def create_ai_match(user, chat, difficulty="medium"):
     match["players"].append({
         "id": str(user.id),
         "name": user.first_name,
-        "username": user.username,
-        "is_ai": False
+        "username": user.username
     })
     
-    # Start match immediately
     match["state"] = "toss"
     
-    # Human calls toss in AI matches
     match_text = (
-        f"🤖 *AI MATCH STARTED!*\n"
+        f"🤖 AI MATCH STARTED!\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
         f"Match ID: `{match['match_id']}`\n"
         f"Player: {user.first_name}\n"
-        f"AI Opponent: APEX AI ({difficulty.upper()})\n"
+        f"AI: APEX AI ({difficulty.upper()})\n"
         f"Format: 1 Over | 2 Wickets\n\n"
-        f"🎯 *TOSS TIME!*\n"
+        f"🎯 TOSS TIME!\n"
         f"Call heads or tails:"
     )
     
     keyboard = [
-        [normal_btn("🌕 HEADS", f"heads_{match['match_id']}"), 
-         normal_btn("🌑 TAILS", f"tails_{match['match_id']}")]
+        [
+            InlineKeyboardButton("🌕 HEADS", callback_data=f"heads_{match['match_id']}"),
+            InlineKeyboardButton("🌑 TAILS", callback_data=f"tails_{match['match_id']}")
+        ]
     ]
     
     message = await context.bot.send_message(
         chat_id=chat.id,
         text=match_text,
-        reply_markup={"inline_keyboard": keyboard},
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -516,7 +420,6 @@ async def create_ai_match(user, chat, difficulty="medium"):
     return match
 
 async def play_friend_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle playing vs friend (public match)"""
     user = update.effective_user
     chat = update.effective_chat
     
@@ -534,7 +437,7 @@ async def play_friend_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     
-    match = create_match(chat.id, user.id)
+    match = create_match(chat.id, user.id, vs_ai=False)
     if not match:
         await update.message.reply_text(
             "Could not create match! Try again later.",
@@ -549,28 +452,29 @@ async def play_friend_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     })
     
     match_text = (
-        f"🎮 *MATCH CREATED!*\n"
+        f"🎮 MATCH CREATED!\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
         f"Match ID: `{match['match_id']}`\n"
         f"Created by: {user.first_name}\n"
         f"Type: Public Match\n"
         f"⏳ Timeout: 2 minutes\n\n"
-        f"🔹 *Players (1/2):*\n"
+        f"🔹 Players (1/2):\n"
         f"1. {user.first_name}\n"
         f"2. Waiting for opponent...\n\n"
-        f"🎯 *To join:* `/join {match['match_id']}`\n\n"
-        f"⏰ Match auto-cancels in 2 minutes if no one joins."
+        f"🎯 To join: /join {match['match_id']}\n\n"
+        f"⏰ Auto-cancels in 2 minutes"
     )
     
     keyboard = [
-        [success_btn(f"✅ JOIN {match['match_id']}", f"join_{match['match_id']}"), 
-         danger_btn("❌ CANCEL", f"cancel_{match['match_id']}")],
-        [normal_btn("🤖 VS AI INSTEAD", f"switch_to_ai_{match['match_id']}")]
+        [
+            InlineKeyboardButton("✅ JOIN MATCH", callback_data=f"join_{match['match_id']}"),
+            InlineKeyboardButton("❌ CANCEL", callback_data=f"cancel_{match['match_id']}")
+        ]
     ]
     
     message = await update.message.reply_text(
         match_text,
-        reply_markup={"inline_keyboard": keyboard},
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -583,8 +487,8 @@ async def challenge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not args:
         await update.message.reply_text(
-            "Usage: `/challenge @username`\n\n"
-            "Example: `/challenge @john`\n\n"
+            "Usage: /challenge @username\n\n"
+            "Example: /challenge @john\n\n"
             "Only that user can join your match!",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -608,7 +512,7 @@ async def challenge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    match = create_match(chat.id, user.id, is_private=True, invited_user=username)
+    match = create_match(chat.id, user.id, vs_ai=False, is_private=True, invited_user=username)
     if not match:
         await update.message.reply_text(
             "Could not create challenge! Try again later.",
@@ -623,26 +527,25 @@ async def challenge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     
     challenge_text = (
-        f"⚔️ *PRIVATE CHALLENGE!* ⚔️\n"
+        f"⚔️ PRIVATE CHALLENGE!\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
-        f"**From:** {user.first_name}\n"
-        f"**To:** @{username}\n"
-        f"**Match ID:** `{match['match_id']}`\n\n"
-        f"🔒 *Special Rules:*\n"
-        f"• Only @{username} can join this match\n"
-        f"• Others cannot join or spectate\n"
-        f"• Auto-cancels in 2 minutes\n\n"
-        f"@{username}, click below to accept challenge!"
+        f"From: {user.first_name}\n"
+        f"To: @{username}\n"
+        f"Match ID: `{match['match_id']}`\n\n"
+        f"🔒 Only @{username} can join!\n\n"
+        f"@{username}, click below to accept:"
     )
     
     keyboard = [
-        [primary_btn("✅ ACCEPT CHALLENGE", f"accept_{match['match_id']}"),
-         danger_btn("❌ DECLINE", f"decline_{match['match_id']}")]
+        [
+            InlineKeyboardButton("✅ ACCEPT CHALLENGE", callback_data=f"accept_{match['match_id']}"),
+            InlineKeyboardButton("❌ DECLINE", callback_data=f"decline_{match['match_id']}")
+        ]
     ]
     
     message = await update.message.reply_text(
         challenge_text,
-        reply_markup={"inline_keyboard": keyboard},
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -668,16 +571,14 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     match = get_match(match_id)
     if not match:
         await update.message.reply_text(
-            f"Match `{match_id}` not found or expired.\n"
-            f"Use `/matches` to see active matches.",
+            f"Match `{match_id}` not found or expired.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
     
     if match["vs_ai"]:
         await update.message.reply_text(
-            f"This is an AI match! You cannot join.\n"
-            f"Use `/cricket ai` to play vs AI.",
+            f"This is an AI match! Use `/cricket` to play vs AI.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -692,7 +593,7 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         match["state"] = "toss"
         
         await update.message.reply_text(
-            f"✅ *Joined successfully!*\n\n"
+            f"✅ Joined successfully!\n\n"
             f"Match ID: `{match_id}`\n"
             f"Opponent: {match['players'][0]['name']}\n\n"
             f"Match starting...",
@@ -700,19 +601,21 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         update_text = (
-            f"🎮 *MATCH STARTED!*\n"
+            f"🎮 MATCH STARTED!\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"Match ID: `{match_id}`\n\n"
-            f"👥 *Players:*\n"
+            f"👥 Players:\n"
             f"1. {match['players'][0]['name']}\n"
             f"2. {match['players'][1]['name']}\n\n"
-            f"🪙 *TOSS TIME!*\n"
+            f"🪙 TOSS TIME!\n"
             f"New joiner calls toss:"
         )
         
         keyboard = [
-            [normal_btn("🌕 HEADS", f"heads_{match_id}"), 
-             normal_btn("🌑 TAILS", f"tails_{match_id}")]
+            [
+                InlineKeyboardButton("🌕 HEADS", callback_data=f"heads_{match_id}"),
+                InlineKeyboardButton("🌑 TAILS", callback_data=f"tails_{match_id}")
+            ]
         ]
         
         try:
@@ -720,19 +623,18 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=match["chat_id"],
                 message_id=match["message_id"],
                 text=update_text,
-                reply_markup={"inline_keyboard": keyboard},
+                reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.MARKDOWN
             )
         except:
             pass
     else:
         await update.message.reply_text(
-            "❌ *Cannot join match!*\n\n"
+            "❌ Cannot join match!\n\n"
             "Possible reasons:\n"
             "• Match is full\n"
             "• You're already in another match\n"
-            "• Private match restrictions\n"
-            "• Match is vs AI",
+            "• Private match restrictions",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -748,13 +650,13 @@ async def matches_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    matches_text = f"🏏 *ACTIVE MATCHES ({len(match_ids)}/{MAX_MATCHES_PER_GROUP})*\n━━━━━━━━━━━━━━━━━━\n\n"
+    matches_text = f"🏏 ACTIVE MATCHES ({len(match_ids)}/{MAX_MATCHES_PER_GROUP})\n━━━━━━━━━━━━━━━━━━\n\n"
     
     for i, match_id in enumerate(match_ids[:5]):
         match = get_match(match_id)
         if match:
             status = "⏳ Waiting" if len(match["players"]) < 2 else "🎮 Playing"
-            ai_tag = "🤖 AI" if match["vs_ai"] else ""
+            ai_tag = "🤖" if match["vs_ai"] else ""
             lock_tag = "🔒" if match["is_private"] else ""
             
             players = []
@@ -770,7 +672,7 @@ async def matches_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             time_left = max(0, MATCH_TIMEOUT - time_ago)
             
             matches_text += (
-                f"**{i+1}. {match_id}** {ai_tag}{lock_tag}\n"
+                f"{i+1}. {match_id} {ai_tag}{lock_tag}\n"
                 f"   👥 {players_text}\n"
                 f"   📊 {status} | ⏳ {time_left}s\n\n"
             )
@@ -781,14 +683,14 @@ async def matches_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for match_id in match_ids[:3]:
         match = get_match(match_id)
         if match and len(match["players"]) < 2 and not match["vs_ai"]:
-            keyboard.append([success_btn(f"🎮 JOIN {match_id}", f"join_{match_id}")])
+            keyboard.append([InlineKeyboardButton(f"🎮 JOIN {match_id}", callback_data=f"join_{match_id}")])
     
     if keyboard:
         keyboard.append([
-            normal_btn("🔄 REFRESH", "refresh_matches"),
-            primary_btn("🎯 NEW MATCH", "play_cricket")
+            InlineKeyboardButton("🔄 REFRESH", callback_data="refresh_matches"),
+            InlineKeyboardButton("🎯 NEW MATCH", callback_data="cricket_menu")
         ])
-        reply_markup = {"inline_keyboard": keyboard}
+        reply_markup = InlineKeyboardMarkup(keyboard)
     else:
         reply_markup = None
     
@@ -865,16 +767,14 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_users = len(set([p["id"] for match in active_matches.values() for p in match.get("players", []) if p["id"] != "ai_bot"]))
         total_groups = len(group_matches)
         total_matches = len(active_matches)
-        ai_matches_count = len(ai_matches)
         
         admin_text = (
-            f"🤖 *ADMIN DASHBOARD*\n"
+            f"🤖 ADMIN DASHBOARD\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"👥 Active Users: `{total_users}`\n"
             f"👥 Total Groups: `{total_groups}`\n"
-            f"🎮 Active Matches: `{total_matches}`\n"
-            f"🤖 AI Matches: `{ai_matches_count}`\n\n"
-            f"📊 *Group List:*\n"
+            f"🎮 Active Matches: `{total_matches}`\n\n"
+            f"📊 Group List:\n"
         )
         
         for chat_id, matches in group_matches.items()[:5]:
@@ -893,29 +793,29 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target = args[0]
     
     stats_text = (
-        f"📊 *PLAYER STATISTICS*\n"
+        f"📊 PLAYER STATISTICS\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
         f"👤 Player: {user.first_name}\n"
         f"📅 Joined: Today\n\n"
         f"🎮 Matches Played: 0\n"
         f"🏆 Wins: 0\n"
-        f"💔 Losses: 0\n"
-        f"🤖 AI Matches: 0\n\n"
-        f"🔥 *Coming Soon:*\n"
+        f"💔 Losses: 0\n\n"
+        f"🔥 Coming Soon:\n"
         "• Detailed statistics\n"
         "• Leaderboard\n"
-        "• Achievements\n"
-        "• Tournament mode"
+        "• Achievements"
     )
     
     keyboard = [
-        [normal_btn("🔄 REFRESH", f"refresh_stats_{user.id}"), 
-         success_btn("📈 LEADERBOARD", "leaderboard")]
+        [
+            InlineKeyboardButton("🔄 REFRESH", callback_data=f"refresh_stats_{user.id}"),
+            InlineKeyboardButton("📈 LEADERBOARD", callback_data="leaderboard")
+        ]
     ]
     
     await update.message.reply_text(
         stats_text,
-        reply_markup={"inline_keyboard": keyboard},
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -927,31 +827,46 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.answer()
     
-    if data == "play_cricket":
+    # Menu navigation
+    if data == "cricket_menu":
         await cricket_command(update, context)
     
-    elif data == "play_vs_ai":
-        await play_vs_ai_command(update, context)
+    elif data == "play_ai":
+        await play_ai_command(update, context)
     
     elif data == "play_friend":
         await play_friend_command(update, context)
     
-    elif data == "play_ai_menu":
-        await play_vs_ai_command(update, context)
+    elif data == "challenge_menu":
+        await query.edit_message_text(
+            "🔒 PRIVATE CHALLENGE\n\n"
+            "To challenge a friend:\n"
+            "Use command: /challenge @username\n\n"
+            "Example: /challenge @john\n\n"
+            "Only that user can join!",
+            parse_mode=ParseMode.MARKDOWN
+        )
     
-    elif data == "play_friend_menu":
-        await play_friend_command(update, context)
+    elif data == "my_stats":
+        await stats_command(update, context)
     
-    elif data == "quick_play":
-        await play_friend_command(update, context)
+    elif data == "refresh_matches":
+        await matches_command(update, context)
     
-    elif data == "back_to_main":
-        await start_command(update, context)
+    elif data == "leaderboard":
+        await query.edit_message_text(
+            "🏆 LEADERBOARD COMING SOON!\n\n"
+            "Track rankings and scores!\n\n"
+            "Use `/stats` for personal statistics.",
+            parse_mode=ParseMode.MARKDOWN
+        )
     
+    # AI difficulty selection
     elif data.startswith("ai_"):
-        difficulty = data[3:]  # easy, medium, hard, expert
-        await create_ai_match_helper(query, context, user, difficulty)
+        difficulty = data[3:]  # easy, medium, hard
+        await handle_ai_difficulty(query, context, user, difficulty)
     
+    # Match actions
     elif data.startswith("join_"):
         await handle_join_callback(query, context, data[5:], user)
     
@@ -961,27 +876,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("cancel_"):
         await handle_cancel_callback(query, context, data[7:], user)
     
-    elif data.startswith("switch_to_ai_"):
-        match_id = data[13:]
-        await switch_to_ai_callback(query, context, match_id, user)
-    
-    elif data == "my_stats":
-        await stats_command(update, context)
-    
-    elif data == "refresh_matches":
-        await matches_command(update, context)
-    
-    elif data == "new_match":
-        await cricket_command(update, context)
-    
-    elif data == "leaderboard":
-        await query.edit_message_text(
-            "🏆 *LEADERBOARD COMING SOON!*\n\n"
-            "Track rankings, scores, and achievements!\n\n"
-            "Use `/stats` for personal statistics.",
-            parse_mode=ParseMode.MARKDOWN
-        )
-    
+    # Game actions
     elif data.startswith("heads_") or data.startswith("tails_"):
         await handle_toss_callback(query, context, data, user)
     
@@ -995,66 +890,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.answer("Feature coming soon!", show_alert=True)
 
-async def create_ai_match_helper(query, context, user, difficulty):
-    """Helper to create AI match from callback"""
+async def handle_ai_difficulty(query, context, user, difficulty):
+    """Handle AI difficulty selection"""
     match = await create_ai_match(user, query.message.chat, difficulty)
     if match:
         await query.edit_message_text(
-            f"🤖 *AI MATCH STARTED!*\n"
+            f"🤖 AI MATCH STARTED!\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"Match ID: `{match['match_id']}`\n"
             f"Player: {user.first_name}\n"
-            f"AI Opponent: APEX AI ({difficulty.upper()})\n"
+            f"AI: APEX AI ({difficulty.upper()})\n"
             f"Format: 1 Over | 2 Wickets\n\n"
-            f"🎯 *TOSS TIME!*\n"
+            f"🎯 TOSS TIME!\n"
             f"Call heads or tails:",
-            reply_markup={
-                "inline_keyboard": [
-                    [normal_btn("🌕 HEADS", f"heads_{match['match_id']}"), 
-                     normal_btn("🌑 TAILS", f"tails_{match['match_id']}")]
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🌕 HEADS", callback_data=f"heads_{match['match_id']}"),
+                    InlineKeyboardButton("🌑 TAILS", callback_data=f"tails_{match['match_id']}")
                 ]
-            },
+            ]),
             parse_mode=ParseMode.MARKDOWN
         )
     else:
         await query.answer("Could not create AI match!", show_alert=True)
-
-async def switch_to_ai_callback(query, context, match_id, user):
-    """Switch waiting match to AI match"""
-    match = get_match(match_id)
-    if not match:
-        await query.answer("Match not found!", show_alert=True)
-        return
-    
-    if match["created_by"] != str(user.id):
-        await query.answer("Only match creator can switch to AI!", show_alert=True)
-        return
-    
-    # Remove current match
-    remove_match(match_id)
-    
-    # Create new AI match
-    new_match = await create_ai_match(user, query.message.chat, "medium")
-    if new_match:
-        await query.edit_message_text(
-            f"🔄 *SWITCHED TO AI MATCH!*\n"
-            f"━━━━━━━━━━━━━━━━━━\n\n"
-            f"Match ID: `{new_match['match_id']}`\n"
-            f"Player: {user.first_name}\n"
-            f"AI Opponent: APEX AI (MEDIUM)\n"
-            f"Format: 1 Over | 2 Wickets\n\n"
-            f"🎯 *TOSS TIME!*\n"
-            f"Call heads or tails:",
-            reply_markup={
-                "inline_keyboard": [
-                    [normal_btn("🌕 HEADS", f"heads_{new_match['match_id']}"), 
-                     normal_btn("🌑 TAILS", f"tails_{new_match['match_id']}")]
-                ]
-            },
-            parse_mode=ParseMode.MARKDOWN
-        )
-    else:
-        await query.answer("Could not switch to AI!", show_alert=True)
 
 async def handle_join_callback(query, context, match_id, user):
     if str(user.id) in user_matches:
@@ -1067,7 +925,7 @@ async def handle_join_callback(query, context, match_id, user):
         return
     
     if match["vs_ai"]:
-        await query.answer("This is an AI match! Use /cricket ai to play vs AI.", show_alert=True)
+        await query.answer("This is an AI match! Use /cricket to play vs AI.", show_alert=True)
         return
     
     if match["is_private"] and match["invited_user"]:
@@ -1087,24 +945,26 @@ async def handle_join_callback(query, context, match_id, user):
         await query.answer("✅ Joined successfully!")
         
         update_text = (
-            f"🎮 *MATCH STARTED!*\n"
+            f"🎮 MATCH STARTED!\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"Match ID: `{match_id}`\n\n"
-            f"👥 *Players:*\n"
+            f"👥 Players:\n"
             f"1. {match['players'][0]['name']}\n"
             f"2. {match['players'][1]['name']}\n\n"
-            f"🪙 *TOSS TIME!*\n"
+            f"🪙 TOSS TIME!\n"
             f"New joiner calls toss:"
         )
         
         keyboard = [
-            [normal_btn("🌕 HEADS", f"heads_{match_id}"), 
-             normal_btn("🌑 TAILS", f"tails_{match_id}")]
+            [
+                InlineKeyboardButton("🌕 HEADS", callback_data=f"heads_{match_id}"),
+                InlineKeyboardButton("🌑 TAILS", callback_data=f"tails_{match_id}")
+            ]
         ]
         
         await query.edit_message_text(
             update_text,
-            reply_markup={"inline_keyboard": keyboard},
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN
         )
     else:
@@ -1141,7 +1001,7 @@ async def handle_cancel_callback(query, context, match_id, user):
     await query.answer("Match cancelled!")
     
     await query.edit_message_text(
-        f"❌ *MATCH CANCELLED*\n\n"
+        f"❌ MATCH CANCELLED\n\n"
         f"Match ID: `{match_id}`\n"
         f"Cancelled by: {user.first_name}",
         parse_mode=ParseMode.MARKDOWN
@@ -1163,69 +1023,64 @@ async def handle_toss_callback(query, context, data, user):
     user_call = "heads" if data.startswith("heads_") else "tails"
     
     # Determine toss winner
-    if user_call == toss_result:
-        toss_winner = user
-        result_text = f"🎉 {user.first_name} won the toss!"
-        batting_first = user if not match["vs_ai"] else "human"
-    else:
-        if match["vs_ai"]:
-            toss_winner = "ai"
-            result_text = f"🤖 APEX AI won the toss!"
-            batting_first = "ai"
+    is_user_winner = (user_call == toss_result)
+    
+    if match["vs_ai"]:
+        if is_user_winner:
+            toss_text = f"🎉 {user.first_name} won the toss!\nYou choose to BAT first!"
+            match["batting_first"] = "human"
         else:
-            other_player = [p for p in match["players"] if str(p["id"]) != str(user.id)][0]
-            toss_winner = other_player
-            result_text = f"🎉 {other_player['name']} won the toss!"
-            batting_first = other_player
+            toss_text = f"🤖 APEX AI won the toss!\nAI chooses to BAT first!"
+            match["batting_first"] = "ai"
+    else:
+        other_player = [p for p in match["players"] if str(p["id"]) != str(user.id)][0]
+        if is_user_winner:
+            toss_text = f"🎉 {user.first_name} won the toss!\nYou choose to BAT first!"
+            match["batting_first"] = str(user.id)
+        else:
+            toss_text = f"🎉 {other_player['name']} won the toss!\nThey choose to BAT first!"
+            match["batting_first"] = str(other_player["id"])
     
     match["state"] = "inning1"
-    match["toss_winner"] = toss_winner
-    match["batting_first"] = batting_first
-    
-    # Set current batsman and bowler
-    if match["vs_ai"]:
-        if batting_first == "human":
-            match["current_batsman"] = str(user.id)
-            match["current_bowler"] = "ai_bot"
-            batting_text = f"{user.first_name} chose to BAT first!"
-        else:
-            match["current_batsman"] = "ai_bot"
-            match["current_bowler"] = str(user.id)
-            batting_text = "🤖 APEX AI chose to BAT first!"
-    else:
-        # Human vs Human
-        match["current_batsman"] = str(user.id) if batting_first == user else str(match["players"][1]["id"])
-        match["current_bowler"] = str(match["players"][1]["id"]) if batting_first == user else str(user.id)
-        batting_text = f"{toss_winner['name'] if isinstance(toss_winner, dict) else toss_winner} chose to BAT first!"
+    match["toss_winner"] = str(user.id) if is_user_winner else "ai_bot" if match["vs_ai"] else str(other_player["id"])
     
     update_text = (
-        f"🪙 *TOSS RESULT*\n"
+        f"🪙 TOSS RESULT\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
         f"Match ID: `{match_id}`\n"
         f"Your call: {user_call.upper()}\n"
         f"Result: {toss_result.upper()}\n\n"
-        f"{result_text}\n"
-        f"{batting_text}\n\n"
-        f"🏏 *FIRST INNINGS STARTING...*"
+        f"{toss_text}\n\n"
+        f"🏏 FIRST INNINGS STARTING..."
     )
     
     # Show game buttons
     keyboard = [
-        [normal_btn("1️⃣", f"n1_{match_id}"), normal_btn("2️⃣", f"n2_{match_id}"), normal_btn("3️⃣", f"n3_{match_id}")],
-        [normal_btn("4️⃣", f"n4_{match_id}"), normal_btn("5️⃣", f"n5_{match_id}"), normal_btn("6️⃣", f"n6_{match_id}")],
-        [danger_btn("🏳️ SURRENDER", f"surrender_{match_id}")]
+        [
+            InlineKeyboardButton("1️⃣", callback_data=f"n1_{match_id}"),
+            InlineKeyboardButton("2️⃣", callback_data=f"n2_{match_id}"),
+            InlineKeyboardButton("3️⃣", callback_data=f"n3_{match_id}")
+        ],
+        [
+            InlineKeyboardButton("4️⃣", callback_data=f"n4_{match_id}"),
+            InlineKeyboardButton("5️⃣", callback_data=f"n5_{match_id}"),
+            InlineKeyboardButton("6️⃣", callback_data=f"n6_{match_id}")
+        ],
+        [
+            InlineKeyboardButton("🏳️ SURRENDER", callback_data=f"surrender_{match_id}")
+        ]
     ]
     
     await query.edit_message_text(
         update_text,
-        reply_markup={"inline_keyboard": keyboard},
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
     
     await query.answer(f"Toss result: {toss_result.upper()}!")
     
-    # If AI is batting first, make AI move
-    if match["vs_ai"] and match["current_batsman"] == "ai_bot":
+    # If AI is batting first in AI match, make AI move
+    if match["vs_ai"] and match["batting_first"] == "ai":
         await asyncio.sleep(1)
         await make_ai_move(query, context, match_id)
 
@@ -1245,66 +1100,33 @@ async def handle_ball_callback(query, context, data, user):
     # Get ball number
     ball_number = int(data[1])
     
-    # Process the ball
+    # Determine if user is batting or bowling
+    is_batting = False
+    if match["vs_ai"]:
+        if match["batting_first"] == "human":
+            is_batting = True
+        else:
+            is_batting = False
+    else:
+        # Human vs human - need to check current state
+        is_batting = True  # Simplified for now
+    
     if match["vs_ai"]:
         # Human vs AI match
-        if match["current_batsman"] == str(user.id):
+        if is_batting:
             # Human is batting, AI is bowling
-            ball_result = await play_ball(match_id, ball_number)
-            if ball_result:
-                # Show result
-                result_text = (
-                    f"🎯 *BALL RESULT*\n"
-                    f"━━━━━━━━━━━━━━━━━━\n\n"
-                    f"Your choice: {ball_number}\n"
-                    f"AI's choice: {match['choices'].get('ai_bot', '?')}\n\n"
-                    f"📊 {ball_result['result']}\n"
-                    f"💬 {ball_result['commentary']}\n\n"
-                    f"Score: {ball_result['score']}\n"
-                    f"Overs: {ball_result['overs']}\n"
-                    f"Wickets: {match['wickets']}/{match['max_wickets']}"
-                )
-                
-                await query.edit_message_text(
-                    result_text,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-                
-                if ball_result["match_completed"]:
-                    await end_match(query, context, match_id, ball_result["winner"])
-                else:
-                    # Continue game
-                    await asyncio.sleep(2)
-                    await continue_match(query, context, match_id)
-        else:
-            # AI is batting, human is bowling
-            await query.answer("AI is batting! Wait for AI's move.", show_alert=True)
-    else:
-        # Human vs Human match
-        await query.answer("Human vs Human gameplay coming soon!", show_alert=True)
-
-async def make_ai_move(query, context, match_id):
-    """Make AI move in the match"""
-    match = get_match(match_id)
-    if not match or not match["vs_ai"]:
-        return
-    
-    if match["current_batsman"] == "ai_bot":
-        # AI is batting
-        ai_choice = match["ai_bot"].make_move(match)
-        ball_result = await play_ball(match_id, ai_choice)
-        
-        if ball_result:
+            ai_choice = match["ai_bot"].make_move()
+            ball_result = process_ball(match, ball_number, ai_choice)
+            
             result_text = (
-                f"🤖 *AI'S MOVE*\n"
+                f"🎯 BALL RESULT\n"
                 f"━━━━━━━━━━━━━━━━━━\n\n"
-                f"AI's choice: {ai_choice}\n"
-                f"Your choice: {match['choices'].get(str(match['current_bowler']), '?')}\n\n"
+                f"Your choice: {ball_number}\n"
+                f"AI's choice: {ai_choice}\n\n"
                 f"📊 {ball_result['result']}\n"
-                f"💬 {match['ai_bot'].get_commentary(ai_choice, ball_result['is_wicket'])}\n\n"
-                f"Score: {ball_result['score']}\n"
-                f"Overs: {ball_result['overs']}\n"
-                f"Wickets: {match['wickets']}/{match['max_wickets']}"
+                f"💬 {ball_result['commentary']}\n\n"
+                f"Score: {match['score']}/{match['wickets']}\n"
+                f"Overs: {match['overs']}.{match['balls']}"
             )
             
             await query.edit_message_text(
@@ -1312,46 +1134,85 @@ async def make_ai_move(query, context, match_id):
                 parse_mode=ParseMode.MARKDOWN
             )
             
-            if ball_result["match_completed"]:
+            if ball_result.get("match_complete"):
                 await end_match(query, context, match_id, ball_result["winner"])
+            elif ball_result.get("innings_complete"):
+                await switch_innings(query, context, match_id)
             else:
-                # Switch to human's turn
                 await asyncio.sleep(2)
-                await continue_match(query, context, match_id)
+                await continue_game(query, context, match_id)
+        else:
+            # AI is batting, human is bowling
+            ai_choice = match["ai_bot"].make_move()
+            ball_result = process_ball(match, ai_choice, ball_number)
+            
+            result_text = (
+                f"🤖 AI'S MOVE\n"
+                f"━━━━━━━━━━━━━━━━━━\n\n"
+                f"AI's choice: {ai_choice}\n"
+                f"Your choice: {ball_number}\n\n"
+                f"📊 {ball_result['result']}\n"
+                f"💬 {ball_result['commentary']}\n\n"
+                f"Score: {match['score']}/{match['wickets']}\n"
+                f"Overs: {match['overs']}.{match['balls']}"
+            )
+            
+            await query.edit_message_text(
+                result_text,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            if ball_result.get("match_complete"):
+                await end_match(query, context, match_id, ball_result["winner"])
+            elif ball_result.get("innings_complete"):
+                await switch_innings(query, context, match_id)
+            else:
+                await asyncio.sleep(2)
+                await continue_game(query, context, match_id)
+    else:
+        # Human vs Human (simplified)
+        await query.answer("Human vs Human gameplay!", show_alert=True)
 
-async def continue_match(query, context, match_id):
-    """Continue the match with next turn"""
+async def make_ai_move(query, context, match_id):
+    """Make AI move in AI match"""
+    match = get_match(match_id)
+    if not match or not match["vs_ai"]:
+        return
+    
+    if match["batting_first"] == "ai":
+        # AI is batting
+        ai_choice = match["ai_bot"].make_move()
+        # In actual game, would wait for human bowler choice
+        pass
+
+async def continue_game(query, context, match_id):
+    """Continue the game with next turn"""
     match = get_match(match_id)
     if not match:
         return
     
-    # Show next turn
     if match["vs_ai"]:
-        if match["current_batsman"] == "ai_bot":
-            # AI just batted, now human's turn
-            player = next((p for p in match["players"] if p["id"] != "ai_bot"), None)
-            if player:
-                update_text = (
-                    f"🏏 *YOUR TURN TO BAT!*\n"
-                    f"━━━━━━━━━━━━━━━━━━\n\n"
-                    f"Score: {match['score']}/{match['wickets']}\n"
-                    f"Overs: {match['overs']}.{match['balls']}\n"
-                    f"Balls left: {6 - match['balls']}\n\n"
-                    f"Choose your shot (1-6):"
-                )
-        else:
-            # Human just batted, now AI's turn
+        if match["batting_first"] == "human":
             update_text = (
-                f"🎯 *AI'S TURN TO BOWL!*\n"
+                f"🏏 YOUR TURN TO BAT!\n"
                 f"━━━━━━━━━━━━━━━━━━\n\n"
                 f"Score: {match['score']}/{match['wickets']}\n"
                 f"Overs: {match['overs']}.{match['balls']}\n"
                 f"Balls left: {6 - match['balls']}\n\n"
-                f"AI is making its move..."
+                f"Choose your shot (1-6):"
+            )
+        else:
+            update_text = (
+                f"🎯 YOUR TURN TO BOWL!\n"
+                f"━━━━━━━━━━━━━━━━━━\n\n"
+                f"AI Score: {match['score']}/{match['wickets']}\n"
+                f"Overs: {match['overs']}.{match['balls']}\n"
+                f"Balls left: {6 - match['balls']}\n\n"
+                f"Choose your delivery (1-6):"
             )
     else:
         update_text = (
-            f"🏏 *CONTINUE MATCH*\n"
+            f"🏏 CONTINUE MATCH\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"Score: {match['score']}/{match['wickets']}\n"
             f"Overs: {match['overs']}.{match['balls']}\n"
@@ -1359,21 +1220,66 @@ async def continue_match(query, context, match_id):
         )
     
     keyboard = [
-        [normal_btn("1️⃣", f"n1_{match_id}"), normal_btn("2️⃣", f"n2_{match_id}"), normal_btn("3️⃣", f"n3_{match_id}")],
-        [normal_btn("4️⃣", f"n4_{match_id}"), normal_btn("5️⃣", f"n5_{match_id}"), normal_btn("6️⃣", f"n6_{match_id}")],
-        [danger_btn("🏳️ SURRENDER", f"surrender_{match_id}")]
+        [
+            InlineKeyboardButton("1️⃣", callback_data=f"n1_{match_id}"),
+            InlineKeyboardButton("2️⃣", callback_data=f"n2_{match_id}"),
+            InlineKeyboardButton("3️⃣", callback_data=f"n3_{match_id}")
+        ],
+        [
+            InlineKeyboardButton("4️⃣", callback_data=f"n4_{match_id}"),
+            InlineKeyboardButton("5️⃣", callback_data=f"n5_{match_id}"),
+            InlineKeyboardButton("6️⃣", callback_data=f"n6_{match_id}")
+        ],
+        [
+            InlineKeyboardButton("🏳️ SURRENDER", callback_data=f"surrender_{match_id}")
+        ]
     ]
     
     await query.edit_message_text(
         update_text,
-        reply_markup={"inline_keyboard": keyboard},
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def switch_innings(query, context, match_id):
+    """Switch to second innings"""
+    match = get_match(match_id)
+    if not match:
+        return
+    
+    if match["inning"] == 2:
+        # Already in second innings
+        await continue_game(query, context, match_id)
+        return
+    
+    update_text = (
+        f"🔄 INNINGS SWITCH!\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"First innings complete!\n\n"
+        f"Target: {match['target']} runs\n\n"
+        f"🏏 SECOND INNINGS STARTING..."
+    )
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("1️⃣", callback_data=f"n1_{match_id}"),
+            InlineKeyboardButton("2️⃣", callback_data=f"n2_{match_id}"),
+            InlineKeyboardButton("3️⃣", callback_data=f"n3_{match_id}")
+        ],
+        [
+            InlineKeyboardButton("4️⃣", callback_data=f"n4_{match_id}"),
+            InlineKeyboardButton("5️⃣", callback_data=f"n5_{match_id}"),
+            InlineKeyboardButton("6️⃣", callback_data=f"n6_{match_id}")
+        ]
+    ]
+    
+    await query.edit_message_text(
+        update_text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
     
-    # If it's AI's turn, make AI move
-    if match["vs_ai"] and match["current_batsman"] == "ai_bot":
-        await asyncio.sleep(1)
-        await make_ai_move(query, context, match_id)
+    match["inning"] = 2
 
 async def handle_surrender_callback(query, context, match_id, user):
     """Handle surrender"""
@@ -1388,10 +1294,12 @@ async def handle_surrender_callback(query, context, match_id, user):
     
     # Determine winner
     if match["vs_ai"]:
-        winner = "🤖 APEX AI" if match["current_batsman"] == str(user.id) else user.first_name
+        winner = "🤖 APEX AI"
+        loser = user.first_name
     else:
         other_player = [p for p in match["players"] if str(p["id"]) != str(user.id)][0]
         winner = other_player["name"]
+        loser = user.first_name
     
     await end_match(query, context, match_id, winner, surrendered=True)
 
@@ -1400,10 +1308,6 @@ async def end_match(query, context, match_id, winner, surrendered=False):
     match = get_match(match_id)
     if not match:
         return
-    
-    # Get player names
-    human_player = next((p for p in match["players"] if p["id"] != "ai_bot"), None)
-    ai_player = next((p for p in match["players"] if p["id"] == "ai_bot"), None)
     
     if surrendered:
         result_text = "🏳️ SURRENDERED!"
@@ -1417,39 +1321,43 @@ async def end_match(query, context, match_id, winner, surrendered=False):
     )
     
     if match["vs_ai"]:
+        human_player = next((p for p in match["players"] if p["id"] != "ai_bot"), None)
         final_text += (
-            f"👥 *Players:*\n"
+            f"👥 Players:\n"
             f"• {human_player['name'] if human_player else 'Player'}\n"
             f"• 🤖 APEX AI ({match['ai_difficulty'].upper()})\n\n"
         )
         
-        if isinstance(winner, str) and "AI" in winner:
-            final_text += f"🏆 *Winner:* 🤖 APEX AI\n"
-            final_text += f"💔 *Loser:* {human_player['name'] if human_player else 'Player'}\n"
+        if "AI" in winner:
+            final_text += f"🏆 Winner: 🤖 APEX AI\n"
+            final_text += f"💔 Loser: {human_player['name'] if human_player else 'Player'}\n"
         else:
-            final_text += f"🏆 *Winner:* {human_player['name'] if human_player else 'Player'}\n"
-            final_text += f"💔 *Loser:* 🤖 APEX AI\n"
+            final_text += f"🏆 Winner: {human_player['name'] if human_player else 'Player'}\n"
+            final_text += f"💔 Loser: 🤖 APEX AI\n"
     else:
         final_text += (
-            f"👥 *Players:*\n"
+            f"👥 Players:\n"
             f"• {match['players'][0]['name']}\n"
             f"• {match['players'][1]['name']}\n\n"
-            f"🏆 *Winner:* {winner}\n"
+            f"🏆 Winner: {winner}\n"
         )
     
     final_text += (
-        f"\n📊 *Final Score:* {match['score']}/{match['wickets']}\n"
-        f"⏰ *Duration:* {int((datetime.utcnow() - match['created_at']).total_seconds())}s\n\n"
+        f"\n📊 Final Score: {match['score']}/{match['wickets']}\n"
+        f"⏰ Duration: {int((datetime.utcnow() - match['created_at']).total_seconds())}s\n\n"
         f"🎮 Play again with `/cricket`!"
     )
     
     keyboard = [
-        [primary_btn("🎮 PLAY AGAIN", "play_cricket"), success_btn("📊 STATS", "my_stats")]
+        [
+            InlineKeyboardButton("🎮 PLAY AGAIN", callback_data="cricket_menu"),
+            InlineKeyboardButton("📊 STATS", callback_data="my_stats")
+        ]
     ]
     
     await query.edit_message_text(
         final_text,
-        reply_markup={"inline_keyboard": keyboard},
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
     
@@ -1480,7 +1388,7 @@ async def main():
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("cricket", cricket_command))
-    application.add_handler(CommandHandler("play", cricket_command))  # Alias for /play
+    application.add_handler(CommandHandler("play", cricket_command))
     application.add_handler(CommandHandler("challenge", challenge_command))
     application.add_handler(CommandHandler("join", join_command))
     application.add_handler(CommandHandler("matches", matches_command))
@@ -1497,7 +1405,7 @@ async def main():
     await application.start()
     await application.updater.start_polling()
     
-    logger.info("✅ APEX CRICKET BOT with AI is running!")
+    logger.info("✅ APEX CRICKET BOT is running!")
     
     while True:
         await asyncio.sleep(3600)
