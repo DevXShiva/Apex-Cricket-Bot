@@ -1,41 +1,25 @@
-from flask import Flask, request, jsonify
-import threading
-import logging
+from flask import Flask, jsonify
+from datetime import datetime
 import os
 
 app = Flask(__name__)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 @app.route('/')
 def home():
-    """Home endpoint for uptime monitoring"""
     return jsonify({
         "status": "online",
         "service": "APEX Cricket Bot",
-        "version": "2.0"
-    })
-
-@app.route('/health')
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        "status": "healthy",
+        "version": "3.0",
         "timestamp": datetime.utcnow().isoformat()
     })
 
-@app.route('/webhook', methods=['POST'])
-def telegram_webhook():
-    """Telegram webhook endpoint"""
-    if request.method == 'POST':
-        update = request.get_json()
-        # Process Telegram update here
-        logger.info(f"Received update: {update}")
-        return 'OK'
-    
-    return 'Method not allowed', 405
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy"})
+
+@app.route('/ping')
+def ping():
+    return "pong"
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
