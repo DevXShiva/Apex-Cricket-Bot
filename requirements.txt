@@ -1,0 +1,19 @@
+# Core Dependencies
+python-telegram-bot==20.7
+pymongo==4.6.1
+python-dotenv==1.0.0
+
+# Async & Performance
+aiohttp==3.9.1
+asyncio==3.4.3
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2024.1
+uuid==1.30
+
+# Development (Optional)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+flake8==6.1.0
