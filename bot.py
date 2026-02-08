@@ -37,7 +37,7 @@ ADMIN_ID = 5298223577
 # --- STYLING & TEXTS ---
 DIVIDER_TOP = "◈───────────────────◈"
 HEADER_TEXT = "         **APEX CRICKET WORLD**"
-FOOTER_TEXT = "─── \nDeveloped By 𝐒𝐇𝐈𝐕𝐀 𝐂𝐇𝐀𝐔𝐃𝐇𝐀𝐑𝐘"
+FOOTER_TEXT = "\n\n───\n📱 **Developed By [𝐒𝐇𝐈𝐕𝐀 𝐂𝐇𝐀𝐔𝐃𝐇𝐀𝐑𝐘](https://t.me/theprofessorreport_bot)**"
 
 RULES_SECTION = (
     "How to Play and Rules:\n"
@@ -55,7 +55,8 @@ MAIN_MENU_TEXT = (
     "• /cricket - Start New Match\n"
     "• /stats - Your Career Stats\n"
     "• /leaderboard - Global Rankings\n"
-    "• /cancel ID - Stop Match\n\n"
+    "• /cancel Match ID - Stop Match|n
+    "🎯 Challenge Your Friend: Use /cricket @username or TG Numeric Id\n\n"
     f"{RULES_SECTION}\n\n"
     f"{FOOTER_TEXT}"
 )
@@ -178,6 +179,23 @@ async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(text + f"\n{FOOTER_TEXT}", parse_mode=ParseMode.MARKDOWN)
 
+async def cancel_match_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not context.args:
+        return await update.message.reply_text("❌ Please provide Match ID.\nExample: `/cancel a1b2c3d4`", parse_mode=ParseMode.MARKDOWN)
+    
+    mid = context.args[0]
+    if mid in active_matches:
+        m = active_matches[mid]
+        # Only P1 or P2 can cancel
+        if user_id == m.p1['id'] or (m.p2 and user_id == m.p2['id']) or user_id == ADMIN_ID:
+            del active_matches[mid]
+            await update.message.reply_text(f"✅ Match `{mid}` has been cancelled successfully.")
+        else:
+            await update.message.reply_text("🚫 You are not a participant of this match!")
+    else:
+        await update.message.reply_text("❌ Invalid Match ID or match already finished.")
+
 # --- CALLBACK HANDLER ---
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -293,15 +311,19 @@ async def engine(query, m):
         await render(query, m, comm)
 
 async def finish_match(query, m):
-    if m.p1['runs'] > m.p2['runs']: win, res = m.p1, f"{m.p1['name']} Won!"
-    elif m.p2['runs'] > m.p1['runs']: win, res = m.p2, f"{m.p2['name']} Won!"
-    else: win, res = None, "Match Tied!"
+    if m.p1['runs'] > m.p2['runs']: 
+        win, res = m.p1, f"🏆 {m.p1['name']} Won!"
+    elif m.p2['runs'] > m.p1['runs']: 
+        win, res = m.p2, f"🏆 {m.p2['name']} Won!"
+    else: 
+        win, res = None, "🤝 Match Tied!"
     
     # Update Stats
     for p in [m.p1, m.p2]:
         if p['id'] != 0:
             players_col.update_one({"_id": p['id']}, {"$inc": {"matches": 1, "total_runs": p['runs']}})
-    if win and win['id'] != 0: players_col.update_one({"_id": win['id']}, {"$inc": {"wins": 1}})
+    if win and win['id'] != 0: 
+        players_col.update_one({"_id": win['id']}, {"$inc": {"wins": 1}})
     
     final_text = (f"{DIVIDER_TOP}\n{HEADER_TEXT}\n{DIVIDER_TOP}\nMatch Result:\n\n"
                   f"{m.p1['name']}: {m.p1['runs']} runs\n"
@@ -332,6 +354,7 @@ def main():
     app.add_handler(CommandHandler("cricket", play_cricket_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
+    app.add_handler(CommandHandler("cancel", cancel_match_cmd)) # Added cancel handler
     app.add_handler(CommandHandler("botstats", bot_stats))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
