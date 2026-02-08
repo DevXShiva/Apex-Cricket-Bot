@@ -38,7 +38,7 @@ BOT3_TOKEN = os.getenv("BOT3_TOKEN", "")
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 
 # ADMIN IDs
-ADMIN_IDS = [123456789, 987654321]
+ADMIN_IDS = [5298223577]
 
 # Setup logging
 logging.basicConfig(
