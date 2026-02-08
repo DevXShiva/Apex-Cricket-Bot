@@ -3,14 +3,14 @@ import random
 import logging
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.constants import ParseMode
 from motor.motor_asyncio import AsyncIOMotorClient
 import asyncio
 
 # ================= CONFIGURATION =================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority")
 
 # Setup logging
 logging.basicConfig(
@@ -23,12 +23,20 @@ DIVIDER = "◈───────────────────◈"
 FOOTER = "\n\n───\n📱 **Developed By [𝐒𝐇𝐈𝐕𝐀 𝐂𝐇𝐀𝐔𝐃𝐇𝐀𝐑𝐘](https://t.me/theprofessorreport_bot)**"
 
 # ================= MONGODB SETUP =================
-client = AsyncIOMotorClient(MONGODB_URI)
-db = client["apex_cricket_bot"]  # Bot-specific database
-
-# Collections
-users_collection = db["users"]
-matches_collection = db["matches"]
+try:
+    client = AsyncIOMotorClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+    db = client["apex_cricket_bot"]  # Bot-specific database
+    
+    # Collections
+    users_collection = db["users"]
+    matches_collection = db["matches"]
+    
+    print("✅ MongoDB collections initialized")
+except Exception as e:
+    print(f"⚠️  MongoDB connection failed: {e}")
+    # Create dummy collections for offline mode
+    users_collection = None
+    matches_collection = None
 
 # In-memory cache for active matches
 matches_cache = {}
@@ -36,78 +44,100 @@ matches_cache = {}
 # ================= MONGODB HELPER FUNCTIONS =================
 async def get_or_create_user(user_id: int, name: str):
     """Get existing user or create new"""
-    user = await users_collection.find_one({"user_id": str(user_id)})
+    if not users_collection:
+        return {"user_id": str(user_id), "name": name, "total_matches": 0, "wins": 0, "total_runs": 0}
     
-    if not user:
-        user_data = {
-            "user_id": str(user_id),
-            "name": name,
-            "first_seen": datetime.now(),
-            "total_matches": 0,
-            "wins": 0,
-            "total_runs": 0
-        }
-        await users_collection.insert_one(user_data)
-        return user_data
-    
-    return user
+    try:
+        user = await users_collection.find_one({"user_id": str(user_id)})
+        
+        if not user:
+            user_data = {
+                "user_id": str(user_id),
+                "name": name,
+                "first_seen": datetime.now(),
+                "total_matches": 0,
+                "wins": 0,
+                "total_runs": 0
+            }
+            await users_collection.insert_one(user_data)
+            return user_data
+        
+        return user
+    except Exception as e:
+        logger.error(f"Error getting user: {e}")
+        return {"user_id": str(user_id), "name": name, "total_matches": 0, "wins": 0, "total_runs": 0}
 
 async def update_user_stats(user_id: int, won: bool = False, runs: int = 0):
     """Update user statistics after match"""
-    update_data = {
-        "$inc": {
-            "total_matches": 1,
-            "total_runs": runs
+    if not users_collection:
+        return
+    
+    try:
+        update_data = {
+            "$inc": {
+                "total_matches": 1,
+                "total_runs": runs
+            }
         }
-    }
-    
-    if won:
-        update_data["$inc"]["wins"] = 1
-    
-    await users_collection.update_one(
-        {"user_id": str(user_id)},
-        update_data,
-        upsert=True
-    )
+        
+        if won:
+            update_data["$inc"]["wins"] = 1
+        
+        await users_collection.update_one(
+            {"user_id": str(user_id)},
+            update_data,
+            upsert=True
+        )
+    except Exception as e:
+        logger.error(f"Error updating user stats: {e}")
 
 async def save_match_to_db(match_data: dict):
     """Save completed match to database"""
-    await matches_collection.insert_one(match_data)
+    if not matches_collection:
+        return
+    
+    try:
+        await matches_collection.insert_one(match_data)
+    except Exception as e:
+        logger.error(f"Error saving match: {e}")
 
 async def get_leaderboard(limit: int = 10):
     """Get top players leaderboard"""
-    pipeline = [
-        {
-            "$match": {
-                "total_matches": {"$gt": 0}
-            }
-        },
-        {
-            "$project": {
-                "name": 1,
-                "wins": 1,
-                "total_matches": 1,
-                "win_rate": {
-                    "$multiply": [
-                        {"$divide": ["$wins", "$total_matches"]},
-                        100
-                    ]
-                },
-                "avg_runs": {
-                    "$cond": [
-                        {"$eq": ["$total_matches", 0]},
-                        0,
-                        {"$divide": ["$total_runs", "$total_matches"]}
-                    ]
-                }
-            }
-        },
-        {"$sort": {"wins": -1, "win_rate": -1}},
-        {"$limit": limit}
-    ]
+    if not users_collection:
+        return []
     
-    cursor = users_collection.aggregate(pipeline)
-    return await cursor.to_list(length=limit)
+    try:
+        pipeline = [
+            {
+                "$match": {
+                    "total_matches": {"$gt": 0}
+                }
+            },
+            {
+                "$project": {
+                    "name": 1,
+                    "wins": 1,
+                    "total_matches": 1,
+                    "win_rate": {
+                        "$multiply": [
+                            {"$divide": ["$wins", {"$max": ["$total_matches", 1]}]},
+                            100
+                        ]
+                    },
+                    "avg_runs": {
+                        "$divide": ["$total_runs", {"$max": ["$total_matches", 1]}]
+                    }
+                }
+            },
+            {"$sort": {"wins": -1, "win_rate": -1}},
+            {"$limit": limit}
+        ]
+        
+        cursor = users_collection.aggregate(pipeline)
+        return await cursor.to_list(length=limit)
+    except Exception as e:
+        logger.error(f"Error getting leaderboard: {e}")
+        return []
 
 # ================= BOT COMMAND HANDLERS =================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -152,17 +182,24 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_data = await get_or_create_user(user.id, user.first_name)
     
+    total_matches = user_data.get('total_matches', 0)
+    wins = user_data.get('wins', 0)
+    total_runs = user_data.get('total_runs', 0)
+    
+    win_rate = (wins / max(total_matches, 1)) * 100 if total_matches > 0 else 0
+    avg_runs = total_runs / max(total_matches, 1) if total_matches > 0 else 0
+    
     stats_text = f"""
 {DIVIDER}
 📊 **YOUR STATISTICS**
 {DIVIDER}
 
 👤 **Player:** {user_data['name']}
-🎮 **Matches Played:** {user_data.get('total_matches', 0)}
-🏆 **Matches Won:** {user_data.get('wins', 0)}
-📈 **Win Rate:** {user_data.get('total_matches', 0) and (user_data.get('wins', 0)/user_data.get('total_matches', 1)*100):.1f}%
-🏏 **Total Runs:** {user_data.get('total_runs', 0)}
-⚡ **Avg Runs/Match:** {user_data.get('total_matches', 0) and (user_data.get('total_runs', 0)/user_data.get('total_matches', 1)):.1f}
+🎮 **Matches Played:** {total_matches}
+🏆 **Matches Won:** {wins}
+📈 **Win Rate:** {win_rate:.1f}%
+🏏 **Total Runs:** {total_runs}
+⚡ **Avg Runs/Match:** {avg_runs:.1f}
     """
     
     await update.message.reply_text(stats_text + FOOTER, parse_mode=ParseMode.MARKDOWN)
@@ -478,19 +515,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= MAIN BOT SETUP =================
 def main():
     """Main function to start the bot"""
-    # Test MongoDB connection
-    try:
-        # Async connection test
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(client.server_info())
-        print("✅ Connected to MongoDB")
-    except Exception as e:
-        print(f"⚠️  MongoDB connection issue: {e}")
-        print("⚠️  Bot will run without database features")
-    
-    # Create bot application
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Create bot application with simpler approach
+    app = Application.builder().token(BOT_TOKEN).build()
     
     # Add handlers
     app.add_handler(CommandHandler("start", start_command))
