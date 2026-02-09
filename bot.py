@@ -106,8 +106,8 @@ def get_player(user_id, name="Player", username=None):
              "wins": 0, "losses": 0, "matches": 0, "total_runs": 0}
         players_col.insert_one(p)
     else:
-        # Fix for 'Unknown' names in leaderboard
-        if p.get('name') != name or p.get('username') != username:
+        # Force Sync Name: Updates database if name is missing or different
+        if p.get('name') == "Unknown" or p.get('name') != name:
             players_col.update_one({"_id": user_id}, {"$set": {"name": name, "username": username}})
             p['name'] = name
     return p
@@ -176,11 +176,16 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Fetch top players
     players = list(players_col.find({"matches": {"$gt": 0}}).sort("wins", -1).limit(10))
     
     text = f"{DIVIDER_TOP}\n🏆 **GLOBAL LEADERBOARD**\n{DIVIDER_TOP}\n"
     for i, p in enumerate(players, 1):
-        p_name = p.get('name', 'Unknown User') # Handling missing name key
+        p_name = p.get('name', 'Unknown')
+        # Final fallback if name is still 'Unknown'
+        if p_name == "Unknown":
+            p_name = f"User_{str(p['_id'])[:5]}"
+            
         mention = get_mention(p['_id'], p_name)
         text += f"{i}. {mention} — {p['wins']} Wins\n"
     
@@ -339,7 +344,6 @@ async def finish_match(query, m):
     msg = await query.edit_message_text(final_text, parse_mode=ParseMode.MARKDOWN)
     if m.match_id in active_matches: del active_matches[m.match_id]
     
-    # 20 Seconds Auto-Delete for chat cleanup
     asyncio.create_task(auto_delete(query.message.chat_id, msg.message_id, 20))
 
 # --- ADMIN COMMANDS ---
