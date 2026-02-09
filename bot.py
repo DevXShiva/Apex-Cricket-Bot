@@ -47,7 +47,7 @@ RULES_SECTION = (
     "4. Max 2 wickets allowed per innings."
 )
 
-# Combined Start/Cricket Message - FIXED LINE 58 QUOTE
+# Combined Start/Cricket Message
 MAIN_MENU_TEXT = (
     f"{DIVIDER_TOP}\n{HEADER_TEXT}\n{DIVIDER_TOP}\n"
     "Welcome! Hand-Cricket on Telegram.\n"
@@ -126,7 +126,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📊 My Stats", callback_data="cb_stats"), 
          InlineKeyboardButton("🏆 Leaderboard", callback_data="cb_lb")]
     ]
-    await update.message.reply_text(MAIN_MENU_TEXT, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    await update.effective_message.reply_text(MAIN_MENU_TEXT, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 async def play_cricket_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -142,7 +142,7 @@ async def play_cricket_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🎯 **Private Challenge!**\n👤 From: {get_mention(user.id, user.first_name)}\n"
                 f"🎯 Target: {target}\n🆔 ID: `{m.match_id}`\n\nOnly target can join!\n\n{FOOTER_TEXT}")
         keyboard = [[InlineKeyboardButton("Join Challenge 🤝", callback_data=f"join_{m.match_id}")]]
-        return await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+        return await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
     # Private Chat Logic (Only AI mode)
     if chat.type == "private":
@@ -150,14 +150,14 @@ async def play_cricket_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_matches[m.match_id] = m
         keyboard = [[InlineKeyboardButton("Heads", callback_data=f"toss_{m.match_id}_Heads"),
                      InlineKeyboardButton("Tails", callback_data=f"toss_{m.match_id}_Tails")]]
-        return await update.message.reply_text(f"{DIVIDER_TOP}\n🤖 **Apex AI Match**\n{DIVIDER_TOP}\nCall the toss:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+        return await update.effective_message.reply_text(f"{DIVIDER_TOP}\n🤖 **Apex AI Match**\n{DIVIDER_TOP}\nCall the toss:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
     # Group Logic (Show all modes)
     keyboard = [
         [InlineKeyboardButton("🤖 Play vs Apex AI", callback_data="mode_bot"),
          InlineKeyboardButton("👥 Friends Mode (Public)", callback_data="mode_public")]
     ]
-    await update.message.reply_text(MAIN_MENU_TEXT, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    await update.effective_message.reply_text(MAIN_MENU_TEXT, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -168,39 +168,34 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
            f"🏏 Matches: {p['matches']}\n🏆 Wins: {p['wins']}\n💀 Losses: {p['losses']}\n"
            f"📈 Runs: {p['total_runs']}\n🔥 Win Rate: {wr:.1f}%\n\n{FOOTER_TEXT}")
     
-    if update.callback_query:
-        await update.callback_query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     players = list(players_col.find({"matches": {"$gt": 0}}).sort("wins", -1).limit(10))
     
     text = f"{DIVIDER_TOP}\n🏆 **GLOBAL LEADERBOARD**\n{DIVIDER_TOP}\n"
     for i, p in enumerate(players, 1):
-        mention = get_mention(p['_id'], p['name'])
+        p_name = p.get('name', 'Unknown')
+        mention = get_mention(p['_id'], p_name)
         text += f"{i}. {mention} — {p['wins']} Wins\n"
     
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text + f"\n{FOOTER_TEXT}", parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text(text + f"\n{FOOTER_TEXT}", parse_mode=ParseMode.MARKDOWN)
+    await update.effective_message.reply_text(text + f"\n{FOOTER_TEXT}", parse_mode=ParseMode.MARKDOWN)
 
 async def cancel_match_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args:
-        return await update.message.reply_text("❌ Please provide Match ID.\nExample: `/cancel a1b2c3d4`", parse_mode=ParseMode.MARKDOWN)
+        return await update.effective_message.reply_text("❌ Please provide Match ID.\nExample: `/cancel a1b2c3d4`", parse_mode=ParseMode.MARKDOWN)
     
     mid = context.args[0]
     if mid in active_matches:
         m = active_matches[mid]
         if user_id == m.p1['id'] or (m.p2 and user_id == m.p2['id']) or user_id == ADMIN_ID:
             del active_matches[mid]
-            await update.message.reply_text(f"✅ Match `{mid}` has been cancelled successfully.")
+            await update.effective_message.reply_text(f"✅ Match `{mid}` has been cancelled successfully.")
         else:
-            await update.message.reply_text("🚫 You are not a participant of this match!")
+            await update.effective_message.reply_text("🚫 You are not a participant of this match!")
     else:
-        await update.message.reply_text("❌ Invalid Match ID or match already finished.")
+        await update.effective_message.reply_text("❌ Invalid Match ID or match already finished.")
 
 # --- CALLBACK HANDLER ---
 
@@ -324,6 +319,7 @@ async def finish_match(query, m):
     else: 
         win, res = None, "🤝 Match Tied!"
     
+    # Update Stats
     for p in [m.p1, m.p2]:
         if p['id'] != 0:
             players_col.update_one({"_id": p['id']}, {"$inc": {"matches": 1, "total_runs": p['runs']}})
@@ -338,6 +334,7 @@ async def finish_match(query, m):
     msg = await query.edit_message_text(final_text, parse_mode=ParseMode.MARKDOWN)
     if m.match_id in active_matches: del active_matches[m.match_id]
     
+    # 20 Seconds Auto-Delete for chat cleanup
     asyncio.create_task(auto_delete(query.message.chat_id, msg.message_id, 20))
 
 # --- ADMIN COMMANDS ---
@@ -346,7 +343,7 @@ async def bot_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     total_users = players_col.count_documents({})
     live_matches = len(active_matches)
-    await update.message.reply_text(f"🤖 **Bot Stats**\nTotal Users: {total_users}\nLive Matches: {live_matches}")
+    await update.effective_message.reply_text(f"🤖 **Bot Stats**\nTotal Users: {total_users}\nLive Matches: {live_matches}")
 
 # --- MAIN ---
 
