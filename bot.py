@@ -47,7 +47,7 @@ RULES_SECTION = (
     "4. Max 2 wickets allowed per innings."
 )
 
-# Combined Start/Cricket Message
+# Combined Start/Cricket Message - FIXED LINE 58 QUOTE
 MAIN_MENU_TEXT = (
     f"{DIVIDER_TOP}\n{HEADER_TEXT}\n{DIVIDER_TOP}\n"
     "Welcome! Hand-Cricket on Telegram.\n"
@@ -167,7 +167,11 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (f"{DIVIDER_TOP}\n📊 **STATS FOR {get_mention(user.id, user.first_name)}**\n{DIVIDER_TOP}\n"
            f"🏏 Matches: {p['matches']}\n🏆 Wins: {p['wins']}\n💀 Losses: {p['losses']}\n"
            f"📈 Runs: {p['total_runs']}\n🔥 Win Rate: {wr:.1f}%\n\n{FOOTER_TEXT}")
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     players = list(players_col.find({"matches": {"$gt": 0}}).sort("wins", -1).limit(10))
@@ -177,7 +181,10 @@ async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mention = get_mention(p['_id'], p['name'])
         text += f"{i}. {mention} — {p['wins']} Wins\n"
     
-    await update.message.reply_text(text + f"\n{FOOTER_TEXT}", parse_mode=ParseMode.MARKDOWN)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text + f"\n{FOOTER_TEXT}", parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(text + f"\n{FOOTER_TEXT}", parse_mode=ParseMode.MARKDOWN)
 
 async def cancel_match_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -187,7 +194,6 @@ async def cancel_match_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mid = context.args[0]
     if mid in active_matches:
         m = active_matches[mid]
-        # Only P1 or P2 can cancel
         if user_id == m.p1['id'] or (m.p2 and user_id == m.p2['id']) or user_id == ADMIN_ID:
             del active_matches[mid]
             await update.message.reply_text(f"✅ Match `{mid}` has been cancelled successfully.")
@@ -318,7 +324,6 @@ async def finish_match(query, m):
     else: 
         win, res = None, "🤝 Match Tied!"
     
-    # Update Stats
     for p in [m.p1, m.p2]:
         if p['id'] != 0:
             players_col.update_one({"_id": p['id']}, {"$inc": {"matches": 1, "total_runs": p['runs']}})
@@ -333,7 +338,6 @@ async def finish_match(query, m):
     msg = await query.edit_message_text(final_text, parse_mode=ParseMode.MARKDOWN)
     if m.match_id in active_matches: del active_matches[m.match_id]
     
-    # 20 Seconds Auto-Delete for chat cleanup
     asyncio.create_task(auto_delete(query.message.chat_id, msg.message_id, 20))
 
 # --- ADMIN COMMANDS ---
@@ -354,7 +358,7 @@ def main():
     app.add_handler(CommandHandler("cricket", play_cricket_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
-    app.add_handler(CommandHandler("cancel", cancel_match_cmd)) # Added cancel handler
+    app.add_handler(CommandHandler("cancel", cancel_match_cmd)) 
     app.add_handler(CommandHandler("botstats", bot_stats))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
