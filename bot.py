@@ -105,6 +105,11 @@ def get_player(user_id, name="Player", username=None):
         p = {"_id": user_id, "name": name, "username": username, 
              "wins": 0, "losses": 0, "matches": 0, "total_runs": 0}
         players_col.insert_one(p)
+    else:
+        # Fix for 'Unknown' names in leaderboard
+        if p.get('name') != name or p.get('username') != username:
+            players_col.update_one({"_id": user_id}, {"$set": {"name": name, "username": username}})
+            p['name'] = name
     return p
 
 async def auto_delete(chat_id, message_id, delay=20):
@@ -175,7 +180,7 @@ async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = f"{DIVIDER_TOP}\n🏆 **GLOBAL LEADERBOARD**\n{DIVIDER_TOP}\n"
     for i, p in enumerate(players, 1):
-        p_name = p.get('name', 'Unknown')
+        p_name = p.get('name', 'Unknown User') # Handling missing name key
         mention = get_mention(p['_id'], p_name)
         text += f"{i}. {mention} — {p['wins']} Wins\n"
     
